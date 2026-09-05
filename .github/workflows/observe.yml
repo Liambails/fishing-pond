@@ -1,0 +1,29 @@
+name: Fishing Pond observations
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+      timezone: 'Pacific/Auckland'
+concurrency:
+  group: fishing-pond-observer
+  cancel-in-progress: false
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python run.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MAX_LISTINGS_PER_RUN: '3'
+          HEADLESS: 'true'

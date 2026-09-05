@@ -1,0 +1,23 @@
+FISHING POND V1.5.2 — START HERE
+
+UPGRADING FROM V1.5.1
+1. Keep both folders beside each other in Downloads:
+   fishing_pond_v1_5_1
+   fishing_pond_v1_5_2
+2. Double-click: Migrate V1.5.1 Data.command
+   This COPIES your data/history into V1.5.2 and repairs derived fields.
+   It does not alter V1.5.1.
+3. In Chrome -> chrome://extensions
+   Remove/reload the old Fishing Pond extension and Load unpacked:
+   fishing_pond_v1_5_2/chrome_extension
+4. Run:
+   cd ~/Downloads/fishing_pond_v1_5_2
+   python3 fishing_pond.py
+5. Choose 1) Start capture server.
+
+RECOMMENDED VALIDATION
+Recapture these two listings once after upgrading:
+- 6106506435 — should classify as Seat belt, part # 6226483-P, year 2012, engine 1NZ-FXE.
+- 6114027185 — should classify as Window master switch and part_number should remain blank.
+
+Your original V1.5.1 folder remains your rollback copy.

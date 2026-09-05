@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Fishing Pond V1.5.2",
+  "version": "1.1.2",
+  "description": "Instant one-click capture for the Trade Me listing currently open.",
+  "permissions": [
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://www.trademe.co.nz/*",
+    "http://127.0.0.1:8765/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.trademe.co.nz/*"
+      ],
+      "js": [
+        "collector.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Fishing Pond"
+  },
+  "commands": {
+    "capture-current-listing": {
+      "suggested_key": {
+        "default": "Alt+Shift+F",
+        "mac": "Alt+Shift+F"
+      },
+      "description": "Capture current Trade Me listing"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

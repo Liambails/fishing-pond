@@ -1,0 +1,11 @@
+FISHING POND V1.5.2 CHROME EXTENSION
+
+1. Open chrome://extensions
+2. Turn Developer mode ON.
+3. Remove the older Fishing Pond extension, or click Reload only if it already points at this V1.5.2 folder.
+4. Click Load unpacked.
+5. Select: fishing_pond_v1_5_2/chrome_extension
+6. Start the Python capture server before capturing listings.
+
+On a Trade Me listing, use the floating Fishing Pond Capture button or Option+Shift+F.
+The extension does not crawl or automatically navigate listings.
