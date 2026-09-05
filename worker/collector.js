@@ -1,5 +1,5 @@
-window.FishingPondCollect = async function() {
-  // Fishing Pond Trade Me DOM Collector v1.5.2
+window.CobaltCollect = async function() {
+  // COBALT Trade Me DOM Collector v1.5.2
   // Current manually-opened page only. No crawling, navigation, or remote fetches.
   const VERSION = "1.5.2";
   const $ = (s, r=document) => r.querySelector(s);
@@ -106,6 +106,18 @@ window.FishingPondCollect = async function() {
   put('close_date',close,closeSource,.97);
   const remaining=txt($('.tm-listing-close-time__remaining'))||null;
   put('close_remaining',remaining,remaining?'selector:.tm-listing-close-time__remaining':null,.9);
+  const endedPattern=/(?:this listing|this auction|auction)\s+(?:has\s+)?(?:closed|ended)|listing\s+(?:has\s+)?expired|listing\s+(?:has\s+)?(?:been\s+)?withdrawn|listing\s+(?:has\s+)?(?:been\s+)?removed/i;
+  const listingEnded=endedPattern.test(pageText);
+  let listingEndReason=null;
+  if(listingEnded){
+    if(/withdrawn/i.test(pageText))listingEndReason='withdrawn';
+    else if(/removed/i.test(pageText))listingEndReason='removed';
+    else if(/expired/i.test(pageText))listingEndReason='expired';
+    else if(/closed/i.test(pageText))listingEndReason='closed';
+    else listingEndReason='ended';
+  }
+  put('listing_ended',listingEnded,listingEnded?'page-text:closed-state':null,.96);
+  put('listing_end_reason',listingEndReason,listingEnded?'page-text:closed-state':null,.93);
 
   let loc=txt($('.tm-motors-date-city-watchlist__location'));
   if(loc)loc=loc.replace(/^Seller located in\s*/i,'');
@@ -234,6 +246,9 @@ window.FishingPondCollect = async function() {
   if(!record.listing_id)warnings.push('missing_listing_id'); if(!record.listing_title)warnings.push('missing_title'); if(!pricePresent)warnings.push('missing_price'); if(record.views==null)warnings.push('missing_views'); if(!record.seller)warnings.push('missing_seller'); if(!record.description)warnings.push('missing_description');
   record.extraction_quality={core_fields_found:found,core_fields_total:core.length+1,score:Math.round(found/(core.length+1)*100),warnings};
   record._sources=sources;
-  console.log('Fishing Pond extracted:',record);
+  console.log('COBALT extracted:',record);
   return record;
 };
+
+// Backward-compatible alias for legacy worker/extension installs.
+window.FishingPondCollect = window.CobaltCollect;

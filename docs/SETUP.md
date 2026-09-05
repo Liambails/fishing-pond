@@ -1,4 +1,4 @@
-# Fishing Pond V2 — detailed setup
+# COBALT — detailed setup
 
 This setup uses GitHub + Supabase + Vercel + GitHub Actions. The first goal is to make one known listing travel through the entire pipeline before enabling the full tracked queue.
 
@@ -30,7 +30,7 @@ On GitHub create a new private repository named `fishing-pond` (do not initializ
 ```bash
 git init
 git add .
-git commit -m "Fishing Pond v2 foundation"
+git commit -m "COBALT v2 foundation"
 git branch -M main
 git remote add origin https://github.com/YOUR_USERNAME/fishing-pond.git
 git push -u origin main
@@ -72,7 +72,7 @@ Expected output is similar to:
 Imported 26 legacy listing snapshots.
 ```
 
-Go back to Supabase Table Editor and open `listings` and `observations`. You should now see the existing Fishing Pond dataset. The importer schedules imported listings to become due shortly so we can test the worker.
+Go back to Supabase Table Editor and open `listings` and `observations`. You should now see the existing COBALT dataset. The importer schedules imported listings to become due shortly so we can test the worker.
 
 ## 4. Test the Playwright worker locally BEFORE GitHub Actions
 
@@ -144,7 +144,7 @@ The included workflow `.github/workflows/observe.yml` wakes hourly. It does **no
 
 To test it immediately:
 
-**GitHub → Actions → Fishing Pond observations → Run workflow**.
+**GitHub → Actions → COBALT observations → Run workflow**.
 
 Open the run log. You should see JSON describing attempted/succeeded/failed listings.
 
@@ -169,7 +169,7 @@ On Vercel:
 ```text
 SUPABASE_URL=your Supabase project URL
 SUPABASE_SERVICE_ROLE_KEY=your service-role key
-FISHING_POND_INGEST_TOKEN=the random token generated above
+COBALT_INGEST_TOKEN=the random token generated above
 ```
 
 6. Deploy.
@@ -186,7 +186,7 @@ Expected:
 {"ok":true,"service":"fishing-pond-v2"}
 ```
 
-Then visit the root URL. You should see the Fishing Pond V2 dashboard and imported listings.
+Then visit the root URL. You should see the COBALT dashboard and imported listings.
 
 ## 7. Install the V2 Chrome extension
 
@@ -196,10 +196,10 @@ Then click **Details → Extension options** and set:
 
 ```text
 Endpoint: https://YOUR-VERCEL-DOMAIN/api/ingest
-Ingest token: the same FISHING_POND_INGEST_TOKEN used in Vercel
+Ingest token: the same COBALT_INGEST_TOKEN used in Vercel
 ```
 
-Open a Trade Me listing manually. The familiar Fishing Pond capture button should appear. Click it. That uses the same hardened V1.5.2 collector, but sends the observation to the cloud API instead of only localhost.
+Open a Trade Me listing manually. The familiar COBALT capture button should appear. Click it. That uses the same hardened V1.5.2 collector, but sends the observation to the cloud API instead of only localhost.
 
 Confirm a new observation appears in Supabase.
 
@@ -209,7 +209,7 @@ Continue discovery exactly as before:
 
 1. Search Trade Me manually for a vehicle/part hypothesis.
 2. Open a useful listing.
-3. Click **Fishing Pond · Capture**.
+3. Click **COBALT · Capture**.
 4. The listing is inserted/upserted into V2.
 5. Assign it to a product record once you decide the product cluster is worth tracking.
 
@@ -282,4 +282,4 @@ These analytics belong in V2.1 after the collection pipeline is proven.
 
 ## 12. Do not delete V1.5.2 yet
 
-`legacy/v1_5_2` is intentionally retained. If the cloud setup breaks while we are building V2, the old local Fishing Pond collector remains available as a fallback and as the source of the extraction logic.
+`legacy/v1_5_2` is intentionally retained. If the cloud setup breaks while we are building V2, the old local COBALT collector remains available as a fallback and as the source of the extraction logic.

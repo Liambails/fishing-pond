@@ -1,7 +1,3 @@
-import type { ReactNode } from 'react';
-
-export const metadata = { title: 'Fishing Pond', description: 'Motera product opportunity tracker' };
-
-export default function RootLayout({ children }: { children: ReactNode }) {
-  return <html lang="en"><body style={{margin:0,fontFamily:'Inter,ui-sans-serif,system-ui',background:'#090d12',color:'#f8fafc'}}>{children}</body></html>;
-}
+import './globals.css';
+export const metadata={title:'COBALT (V3.5.2)',description:'COBALT — Motera Research Lab marketplace intelligence'};
+export default function Layout({children}:{children:React.ReactNode}){return <html lang="en"><body>{children}</body></html>}

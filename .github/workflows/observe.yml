@@ -1,16 +1,17 @@
-name: Fishing Pond observations
+name: COBALT observations
 on:
   workflow_dispatch:
   schedule:
-    - cron: '17 * * * *'
+    # Six scheduler wake-ups per hour. The due queue decides whether any browser collection is needed.
+    - cron: '7,17,27,37,47,57 * * * *'
       timezone: 'Pacific/Auckland'
 concurrency:
-  group: fishing-pond-observer
+  group: cobalt-observer
   cancel-in-progress: false
 jobs:
   observe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: worker
@@ -19,11 +20,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install -r requirements.txt
-      - run: python -m playwright install --with-deps chromium
-      - run: python run.py
+      - name: Check whether anything is due
+        id: due
+        run: python due_check.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          MAX_LISTINGS_PER_RUN: '3'
+      - name: Install Python dependencies
+        if: steps.due.outputs.due == 'true' || github.event_name == 'workflow_dispatch'
+        run: pip install -r requirements.txt
+      - name: Install Chromium
+        if: steps.due.outputs.due == 'true' || github.event_name == 'workflow_dispatch'
+        run: python -m playwright install --with-deps chromium
+      - name: Collect due listings
+        if: steps.due.outputs.due == 'true' || github.event_name == 'workflow_dispatch'
+        run: python run.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MAX_LISTINGS_PER_RUN: '12'
           HEADLESS: 'true'

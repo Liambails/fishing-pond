@@ -1,0 +1,125 @@
+-- COBALT v2.1 intelligence dashboard
+-- Safe additive migration. Run after existing v2 migrations.
+
+alter table public.products add column if not exists verdict text;
+alter table public.products add column if not exists confidence_score numeric(6,2);
+alter table public.products add column if not exists demand_score numeric(6,2);
+alter table public.products add column if not exists competition_score numeric(6,2);
+alter table public.products add column if not exists margin_score numeric(6,2);
+alter table public.products add column if not exists fitment_score numeric(6,2);
+alter table public.products add column if not exists supplier_readiness_score numeric(6,2);
+alter table public.products add column if not exists operational_risk_score numeric(6,2);
+alter table public.products add column if not exists own_sales_score numeric(6,2);
+alter table public.products add column if not exists ai_summary text;
+alter table public.products add column if not exists ai_generated_at timestamptz;
+alter table public.products add column if not exists ai_snapshot jsonb not null default '{}'::jsonb;
+alter table public.products add column if not exists recommended_price_nzd numeric(12,2);
+alter table public.products add column if not exists price_floor_nzd numeric(12,2);
+alter table public.products add column if not exists price_ceiling_nzd numeric(12,2);
+alter table public.products add column if not exists landed_cost_nzd numeric(12,2);
+alter table public.products add column if not exists marketplace_fee_pct numeric(6,3) default 0;
+
+-- Preserve old statuses while adding the commercial lifecycle.
+alter table public.products drop constraint if exists products_status_check;
+alter table public.products add constraint products_status_check check (status in (
+  'discovery','tracking','validated','sourcing','sampling','sample','selling','test_selling','scale','hold','rejected','kill'
+));
+
+create table if not exists public.product_listings (
+  product_id uuid not null references public.products(id) on delete cascade,
+  listing_uuid uuid not null references public.listings(id) on delete cascade,
+  role text not null default 'competitor' check (role in ('competitor','own','reference')),
+  created_at timestamptz not null default now(),
+  primary key(product_id, listing_uuid)
+);
+
+-- Backfill explicit relation table from the legacy listings.product_id relationship.
+insert into public.product_listings(product_id, listing_uuid)
+select product_id, id from public.listings where product_id is not null
+on conflict do nothing;
+
+create table if not exists public.own_listings (
+  id uuid primary key default gen_random_uuid(),
+  product_id uuid not null references public.products(id) on delete cascade,
+  marketplace text not null,
+  listing_url text not null,
+  external_listing_id text,
+  current_price_nzd numeric(12,2),
+  landed_cost_nzd numeric(12,2),
+  marketplace_fee_pct numeric(6,3),
+  inventory integer,
+  views integer,
+  watchers integer,
+  orders integer not null default 0,
+  refunds integer not null default 0,
+  active boolean not null default true,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.price_recommendations (
+  id uuid primary key default gen_random_uuid(),
+  product_id uuid not null references public.products(id) on delete cascade,
+  own_listing_id uuid references public.own_listings(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  current_price_nzd numeric(12,2),
+  suggested_price_nzd numeric(12,2),
+  floor_price_nzd numeric(12,2),
+  ceiling_price_nzd numeric(12,2),
+  confidence numeric(6,2),
+  reason text,
+  evidence jsonb not null default '{}'::jsonb,
+  status text not null default 'pending' check (status in ('pending','accepted','dismissed','expired')),
+  decided_at timestamptz
+);
+
+create table if not exists public.ai_analyses (
+  id uuid primary key default gen_random_uuid(),
+  product_id uuid not null references public.products(id) on delete cascade,
+  generated_at timestamptz not null default now(),
+  model text not null,
+  prompt_version text not null default 'product-analyst-v1',
+  source_snapshot jsonb not null,
+  analysis jsonb not null,
+  summary text,
+  confidence numeric(6,2)
+);
+
+-- collection_errors was introduced during worker hardening. Add resolution fields if table exists.
+do $$
+begin
+  if to_regclass('public.collection_errors') is not null then
+    alter table public.collection_errors add column if not exists status text default 'open';
+    alter table public.collection_errors add column if not exists resolved_at timestamptz;
+    alter table public.collection_errors add column if not exists dismissed_at timestamptz;
+    alter table public.collection_errors add column if not exists resolution_note text;
+  end if;
+end $$;
+
+create table if not exists public.system_events (
+  id bigint generated by default as identity primary key,
+  occurred_at timestamptz not null default now(),
+  severity text not null default 'info' check (severity in ('info','warning','error','critical')),
+  source text not null,
+  event_type text not null,
+  message text not null,
+  context jsonb not null default '{}'::jsonb,
+  status text not null default 'open' check (status in ('open','resolved','dismissed')),
+  resolved_at timestamptz,
+  dismissed_at timestamptz,
+  resolution_note text
+);
+
+create index if not exists product_listings_product_idx on public.product_listings(product_id);
+create index if not exists own_listings_product_idx on public.own_listings(product_id);
+create index if not exists ai_analyses_product_time_idx on public.ai_analyses(product_id, generated_at desc);
+create index if not exists system_events_status_time_idx on public.system_events(status, occurred_at desc);
+
+-- Server-side service key uses these tables. Browser still receives no Supabase key.
+grant select, insert, update, delete on public.product_listings to service_role;
+grant select, insert, update, delete on public.own_listings to service_role;
+grant select, insert, update, delete on public.price_recommendations to service_role;
+grant select, insert, update, delete on public.ai_analyses to service_role;
+grant select, insert, update, delete on public.system_events to service_role;
+grant usage, select on sequence public.system_events_id_seq to service_role;

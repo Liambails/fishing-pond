@@ -1,16 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "Fishing Pond V2 Capture",
-  "version": "2.0.1",
-  "description": "One-click capture of the Trade Me listing currently open, stored in Fishing Pond V2.",
+  "name": "COBALT Capture",
+  "version": "3.5.2",
+  "description": "One-click manual capture/recovery for supported marketplace listings, stored in COBALT.",
   "permissions": [
     "activeTab",
     "storage"
   ],
   "host_permissions": [
     "https://www.trademe.co.nz/*",
-    "http://localhost:3000/*",
-    "http://127.0.0.1:3000/*"
+    "http://127.0.0.1:8765/*",
+    "https://*/*",
+    "https://fishing-pond-seven.vercel.app/*"
   ],
   "content_scripts": [
     {
@@ -25,7 +26,7 @@
     }
   ],
   "action": {
-    "default_title": "Fishing Pond V2"
+    "default_title": "COBALT"
   },
   "commands": {
     "capture-current-listing": {

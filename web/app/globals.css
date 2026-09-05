@@ -1,0 +1,137 @@
+:root{--page:#e7e9ec;--window:#f5f6f7;--white:#fff;--ink:#1d2732;--muted:#5d6b79;--line:#aab6c3;--line2:#ccd3da;--navy:#194e82;--navy2:#2e6da4;--bluebar:#dceaf7;--bluebar2:#eef6fc;--selected:#d9e9f7;--good:#1f6b3a;--warn:#8a5d00;--bad:#9b2525;--link:#0645ad}*{box-sizing:border-box}html,body{margin:0;background:var(--page);color:var(--ink);font-family:Tahoma,Verdana,"Segoe UI",Arial,sans-serif;font-size:13px}button,input,select{font:inherit}a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}.appShell{width:100%;min-height:100vh;background:var(--window);border-top:1px solid #7f8b96}.appHeader{height:74px;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;color:#fff;background:linear-gradient(#3478ae,#1f5b91 56%,#194e82);border-bottom:1px solid #103d67;box-shadow:inset 0 1px rgba(255,255,255,.4)}.brandSmall{font-size:10px;letter-spacing:.2em;opacity:.85}.brandTitle{font-size:26px;font-weight:700;margin-top:2px}.headerMeta{display:flex;gap:8px;align-items:center;font-size:12px}.statusDot{width:8px;height:8px;border-radius:50%;background:#7fd67f;border:1px solid #236823}.overviewSection{padding:20px 26px 18px;background:#fff;border-bottom:1px solid var(--line)}.overviewTitleRow,.sectionBar{display:flex;justify-content:space-between;align-items:flex-end;gap:18px}.sectionKicker{font-size:10px;letter-spacing:.18em;color:#617487;font-weight:700}.overviewSection h1{font-size:22px;margin:3px 0 9px;color:#173f66}.overviewText{font-size:15px;line-height:1.55;max-width:1150px;margin:0 0 12px}.summaryStrip{display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--line2);background:#f3f6f8}.summaryStrip span{padding:7px 14px;border-right:1px solid var(--line2);white-space:nowrap}.summaryStrip b{color:#174f82}.inlineNote{margin-top:9px;color:#6b5c22;font-size:12px}.inlineNote code{background:#f0f0f0;border:1px solid #ddd;padding:1px 3px}.panelSection{margin:18px 20px 0;border:1px solid var(--line);background:#fff}.sectionBar{min-height:46px;padding:8px 10px;background:linear-gradient(#edf5fb,#dceaf7);border-bottom:1px solid var(--line)}.sectionBar h2{font-size:16px;color:#173f66;margin:0}.sectionHint{font-size:11px;color:var(--muted);margin-top:3px}.filters,.filterBar,.actionRow,.issueActions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.filters label,.filterBar label{font-size:11px;color:#435466}.filterBar{padding:7px 9px;background:#f3f4f5;border-bottom:1px solid var(--line2)}select,input{height:26px;border:1px solid #8fa1b2;background:#fff;padding:2px 6px;color:#1d2732;border-radius:0}.searchLabel input{width:220px}.classicButton{display:inline-block;min-height:26px;border:1px solid #7d8d9b;border-radius:2px;background:linear-gradient(#fff,#e2e6ea);color:#1d2732;padding:4px 10px;cursor:pointer;text-decoration:none;box-shadow:inset 0 1px #fff}.classicButton:hover{background:linear-gradient(#fff,#d7e7f4);border-color:#4f7798;text-decoration:none}.classicButton:disabled{opacity:.5;cursor:not-allowed}.primaryButton{font-weight:700;border-color:#47769e;background:linear-gradient(#f8fcff,#cbdff0);color:#173f66}.dataFrame{overflow:auto;background:#fff}.dataFrame table{width:100%;border-collapse:collapse;min-width:1000px}.dataFrame th{background:#eef1f4;color:#34495d;font-size:11px;font-weight:700;text-align:left;padding:7px 8px;border-right:1px solid #cbd2d9;border-bottom:1px solid #aab6c3;white-space:nowrap}.dataFrame td{padding:7px 8px;border-right:1px solid #e2e6ea;border-bottom:1px solid #d5dbe0;vertical-align:top}.dataFrame tbody tr:nth-child(even){background:#f9fafb}.dataFrame tbody tr:hover{background:#e9f2f9}.secondary{font-size:11px;color:var(--muted);margin-top:2px}.emptyCell{padding:18px!important;color:#6b7784}.statusTag{font-size:10px;font-weight:700;padding:2px 5px;border:1px solid #8d9aa6;background:#edf0f2}.statusTag.STRONG,.statusTag.SCALE{color:var(--good);border-color:#79a78b;background:#edf7f0}.statusTag.PROMISING{color:#174f82;border-color:#7da4c4;background:#edf5fb}.statusTag.WATCH{color:var(--warn);border-color:#b79c57;background:#fff8dd}.statusTag.WEAK,.statusTag.KILL{color:var(--bad);border-color:#c68d8d;background:#fff0f0}.signalText{font-size:10px;font-weight:700}.signal-LOOK-CLOSER{color:var(--good)}.signal-WATCH{color:var(--warn)}.signal-LOW-SIGNAL{color:#6b7784}.queueTable{min-width:1450px!important}.whyCell{max-width:280px;color:#435466}.aiReview{margin:10px;border:1px solid #7ea2c2;background:#f5faff}.aiReviewHead{display:flex;justify-content:space-between;padding:7px 9px;background:#dceaf7;border-bottom:1px solid #aabfd2;color:#173f66}.aiReview>p{padding:0 10px;line-height:1.45}.reviewGrid{display:grid;grid-template-columns:1fr 1fr 1fr;border-top:1px solid #d0dbe4}.reviewGrid>div{padding:9px 10px;border-right:1px solid #d0dbe4}.reviewGrid p{margin:4px 0;line-height:1.4}.linkButton{border:0;background:transparent;color:var(--link);cursor:pointer}.issueList{background:#fff}.issueRow{display:grid;grid-template-columns:72px minmax(0,1fr) auto;gap:10px;padding:8px 9px;border-bottom:1px solid #d5dbe0;align-items:start}.issueRow:hover{background:#f4f8fb}.issueType{font-size:9px;font-weight:700;text-align:center;padding:3px;border:1px solid #aab6c3;background:#eef1f4;color:#4b5967}.issueMessage{max-width:900px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.modalBack{position:fixed;inset:0;background:rgba(38,48,58,.45);display:grid;place-items:center;padding:22px;z-index:100}.modal{width:min(1020px,96vw);max-height:92vh;overflow:auto;background:#f6f6f6;border:1px solid #405c75;box-shadow:0 12px 32px rgba(0,0,0,.35)}.modalTitleBar{position:sticky;top:0;z-index:2;background:linear-gradient(#397db2,#1e5c92);color:#fff;padding:9px 10px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #123f68}.windowKicker{font-size:9px;letter-spacing:.14em;opacity:.8}.modalTitleBar h2{font-size:17px;margin:2px 0}.windowClose{width:27px;height:24px;border:1px solid #d9e8f4;background:#f5f5f5;color:#23465f;font-weight:700;cursor:pointer}.modalBody{padding:12px}.decisionHeader{display:flex;align-items:center;gap:12px;padding:8px;border:1px solid #b5c0c9;background:#fff}.analysisBox,.infoBox{border:1px solid #aab6c3;background:#fff;margin-top:10px}.analysisBox p,.infoBox p{padding:0 9px;line-height:1.45}.analysisBox>.classicButton{margin:0 9px 9px}.boxTitle{font-weight:700;color:#173f66;padding:5px 7px;background:#e5eff7;border-bottom:1px solid #b5c6d4}.compactMetrics{display:grid;grid-template-columns:repeat(6,1fr);border:1px solid #aab6c3;background:#fff;margin-top:10px}.compactMetrics>div{padding:7px;border-right:1px solid #d0d5da}.compactMetrics span{display:block;font-size:10px;color:#657482}.compactMetrics b{font-size:14px}.twoColumn{display:grid;grid-template-columns:1fr 1fr;gap:10px}.miniTable{width:100%;border-collapse:collapse}.miniTable td{padding:6px 8px;border-bottom:1px solid #e0e4e8}.miniTable td:last-child{text-align:right}.padTop{padding:8px}.classicDetails{margin-top:10px;border:1px solid #aab6c3;background:#fff}.classicDetails summary{cursor:pointer;padding:6px 8px;font-weight:700;color:#173f66;background:#eef4f8}.classicDetails>div{padding:5px 9px}@media(max-width:850px){.appHeader,.overviewTitleRow,.sectionBar{align-items:flex-start;flex-direction:column;height:auto}.summaryStrip{display:grid;grid-template-columns:1fr 1fr}.reviewGrid,.twoColumn{grid-template-columns:1fr}.compactMetrics{grid-template-columns:repeat(2,1fr)}.panelSection{margin:10px 6px 0}.overviewSection{padding:16px 10px}.issueRow{grid-template-columns:60px 1fr}.issueActions{grid-column:1/-1}}
+
+.overviewHeading{display:flex;align-items:flex-start;gap:7px}.overviewHeading h1{margin:0;color:#173f66;font-size:26px}.overviewHeading sup{font-size:9px;color:#6f7f8f;font-weight:400;white-space:nowrap;top:-.25em;position:relative}.overviewText{max-width:none!important;font-size:14px!important;line-height:1.4!important;margin:8px 0 10px!important}.summaryStrip em{font-style:normal;color:#74818d;font-size:10px}.metricLink{border:0;border-right:1px solid var(--line2);background:transparent;padding:7px 14px;cursor:default;color:var(--ink)}.metricLink.hasIssues{cursor:pointer;color:#8b1e1e;background:#fff2f2;font-weight:700}.metricLink.hasIssues b{color:#b21f1f}.metricLink.hasIssues:hover{text-decoration:underline;background:#ffe7e7}.metricLink:disabled{opacity:1}.issuePanel{margin-top:0;border-top:0}.utilityFooter{margin-top:18px;padding:8px 20px;background:#e9edf1;border-top:1px solid var(--line);display:flex;gap:16px;align-items:center;font-size:11px;color:#657482}.utilityFooter span{font-weight:700;color:#435466}.utilityFooter a{color:#315f8a}.utilityFooter a+a{border-left:1px solid #b8c2cb;padding-left:16px}
+
+/* v2.4 interaction/polish */
+.sectionAnchor{scroll-margin-top:14px}.overviewHeading sup{font-size:11px!important;font-weight:700!important;color:#566b7f!important;top:-.12em!important;letter-spacing:.01em}.overviewTitleRow{align-items:flex-start}.summaryStrip .metricLink{font-family:inherit;font-size:13px;text-align:left;white-space:nowrap;cursor:pointer}.summaryStrip .metricLink:hover{background:#e8f1f8;text-decoration:underline}.summaryStrip .metricLink:disabled{cursor:default}.summaryStrip .metricLink:disabled:hover{background:transparent;text-decoration:none}.issuePanel{margin-left:20px;margin-right:20px}.issueRow{grid-template-columns:82px minmax(0,1fr) minmax(300px,auto)}.issueActions{justify-content:flex-end}.issueMain{min-width:0}.observationSection{margin-bottom:44px}.utilityFooter{margin-top:0;padding:11px 22px;min-height:44px}.utilityFooter a{display:inline-flex;align-items:center;gap:5px}.navIcon{font-style:normal;display:inline-grid;place-items:center;min-width:20px;height:18px;padding:0 3px;border:1px solid #9baab8;background:#f7f9fb;color:#315f8a;font-size:9px;font-weight:700}.utilityFooter a:first-of-type .navIcon{font-size:15px;line-height:1}@media(max-width:850px){.issueRow{grid-template-columns:60px 1fr}.summaryStrip .metricLink{white-space:normal}.observationSection{margin-bottom:28px}}
+
+/* v2.5 observation-state rows + issue drawer positioning */
+.issuePanel{margin-top:14px!important;border-top:1px solid var(--line)!important;scroll-margin-top:18px}
+.queueTable tbody tr.queueRow.queue-GOOD{background:#dff3e5!important}
+.queueTable tbody tr.queueRow.queue-GOOD:hover{background:#d9efdf!important}
+.queueTable tbody tr.queueRow.queue-WATCHING{background:#d9ebfb!important}
+.queueTable tbody tr.queueRow.queue-WATCHING:hover{background:#c9e2f7!important}
+.queueTable tbody tr.queueRow.queue-LOW-SIGNAL{background:#fff6d9!important}
+.queueTable tbody tr.queueRow.queue-LOW-SIGNAL:hover{background:#ffefbd!important}
+.queueTable tbody tr.queueRow.queue-TOO-EARLY{background:#eceff2!important}
+.queueTable tbody tr.queueRow.queue-TOO-EARLY:hover{background:#e0e4e8!important}
+.queueTable tbody tr.queueRow.queue-MUST-HAVE{background:#d8f2df!important}
+.queueTable tbody tr.queueRow.queue-MUST-HAVE:hover{background:#c8ead1!important}
+.signal-GOOD{color:#176b37}.signal-WATCHING{color:#205f95}.signal-LOW-SIGNAL{color:#856200}.signal-TOO-EARLY{color:#66717d}.signal-MUST_HAVE,.signal-MUST-HAVE{color:#0e6a2e;font-weight:800}
+
+/* v2.7 evidence-heavy queue */
+.queueTable{min-width:1660px!important}
+.middleDot{padding:0 4px;color:#8b98a4}
+.hoverValue{display:inline-flex;flex-direction:column;gap:2px;cursor:help;border-bottom:1px dotted #6d8498;min-width:44px}
+.historyAnchor{position:relative;display:inline-block;outline:none}
+.historyAnchor:focus .hoverValue,.historyAnchor:hover .hoverValue{background:#f3f8fc}
+.historyPopover{position:fixed;z-index:350;width:330px;max-height:305px;background:#fff;border:1px solid #6f879b;box-shadow:0 7px 22px rgba(24,43,59,.23);display:block;color:#243746;font-size:12px}
+.historyTitle{display:block;padding:7px 9px;background:linear-gradient(#eaf3fa,#d4e5f2);border-bottom:1px solid #a9bbc9;font-weight:700;color:#173f66}
+.historyScroll{display:block;max-height:260px;overflow-y:auto;overscroll-behavior:contain}
+.historyRow{display:flex;justify-content:space-between;gap:16px;padding:7px 9px;border-bottom:1px solid #e2e7eb;align-items:baseline;background:#fff}
+.historyRow:first-child{background:#f6fbff}
+.historyRow b{font-size:12px}.historyRow small{font-size:10px;color:#687887;white-space:nowrap}.historyEmpty{display:block;padding:12px;color:#687887}
+.viewsDelta{display:block;font-size:10px;color:#657482;font-weight:600;white-space:nowrap}.viewsDelta.positive{color:#16733a}.secondaryLine{display:block;font-size:10px;color:#657482;margin-top:1px}.endedText{color:#8b1e1e;font-weight:700}
+.infoTip{display:inline-grid;place-items:center;position:relative;margin-left:4px;width:14px;height:14px;border:1px solid #7d91a4;border-radius:50%;font-size:9px;font-weight:700;color:#42627d;background:#fff;cursor:help;vertical-align:1px;text-transform:none}
+.infoBubble{display:none;position:absolute;z-index:360;top:19px;left:-120px;width:285px;padding:8px 9px;background:#fff;border:1px solid #6f879b;box-shadow:0 6px 18px rgba(24,43,59,.2);font-size:11px;line-height:1.4;font-weight:400;color:#2c3f50;white-space:normal;text-align:left}
+.infoTip:hover .infoBubble,.infoTip:focus .infoBubble{display:block}
+.confidenceWhy{margin-top:4px;font-size:10px;line-height:1.35;color:#657482}.whyCell{min-width:330px;max-width:420px!important;line-height:1.35}
+.queueTable th:nth-child(5),.queueTable td:nth-child(5){min-width:120px}.queueTable th:nth-child(6),.queueTable td:nth-child(6){min-width:115px}.queueTable th:nth-child(7),.queueTable td:nth-child(7){min-width:110px}.queueTable th:nth-child(8),.queueTable td:nth-child(8){min-width:115px}
+@media(max-width:850px){.historyPopover{width:min(330px,calc(100vw - 16px))}.infoBubble{left:-85px;width:250px}}
+
+/* COBALT V3 brand */
+.cobaltWordmark{font-family:Impact,"Arial Black","Helvetica Neue",Arial,sans-serif;font-weight:900;letter-spacing:.045em}.cobaltWordmark span{font-family:Tahoma,Verdana,"Segoe UI",Arial,sans-serif;font-size:10px;letter-spacing:.08em;opacity:.72;margin-left:5px;vertical-align:middle}.researchId{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-size:9px;letter-spacing:.025em;color:#6a7885}.legacyTag{margin-left:auto!important;font-size:9px!important;font-weight:400!important;color:#8b969f!important;font-style:italic;white-space:nowrap}@media(max-width:850px){.legacyTag{width:100%;margin-left:0!important}}
+
+/* COBALT V3.0 layout correction: normal section gap above Issues, larger breathing room below. */
+.issuePanel{margin-top:18px!important;margin-bottom:44px!important;border-top:1px solid var(--line)!important;scroll-margin-top:18px}
+/* Keep the gap above Issues consistent with other sections; move the larger separation below it. */
+.observationSection{margin-bottom:0!important}
+.issuePanel{margin-top:18px!important;margin-bottom:44px!important}
+@media(max-width:850px){.observationSection{margin-bottom:0!important}.issuePanel{margin-top:10px!important;margin-bottom:28px!important}}
+
+/* COBALT V3.1 queue usability + product lifecycle */
+.queueFrame{max-height:72vh;overflow:auto;position:relative}
+.queueFrame thead th{position:sticky;top:0;z-index:25;background:#eef1f4;box-shadow:0 1px 0 #aab6c3}
+.historyAnchor{position:relative;display:inline-flex;align-items:flex-start;gap:5px;outline:none}
+.hoverValue{border-bottom:0!important;cursor:default!important;min-width:0}
+.historyEye{display:inline-block;position:relative;width:14px;height:9px;margin-top:2px;border:1px solid #6f879b;border-radius:50% / 65%;background:#f7fbfe;cursor:help;flex:0 0 auto}
+.historyEye:after{content:"";position:absolute;width:4px;height:4px;border-radius:50%;background:#42627d;left:4px;top:2px}
+.historyAnchor:hover .historyEye,.historyAnchor:focus .historyEye{border-color:#245b86;background:#e7f2fa}
+.historyPopover{z-index:350;width:330px;max-height:305px;background:#fff;border:1px solid #6f879b;box-shadow:0 7px 22px rgba(24,43,59,.23);display:block;color:#243746;font-size:12px}
+.queueTable td:nth-last-child(-n+3) .historyPopover{left:auto!important;right:0!important}
+.productTitleLine{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.incompleteTag{display:inline-block;padding:1px 5px;border:1px solid #b69042;background:#fff4cc;color:#765500;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+.productActions{display:flex;gap:5px;white-space:nowrap}
+.dangerButton{color:#8f2020;border-color:#b07b7b;background:linear-gradient(#fff,#f4e5e5)}
+.dangerButton:hover{border-color:#8f2020;background:linear-gradient(#fff,#f0d5d5)}
+.setupBox,.ownListingBox{border:1px solid #9fb3c4;background:#fff;margin-bottom:10px}
+.setupBox>p{margin:9px;line-height:1.4}
+.setupForm{display:flex;gap:8px;align-items:end;padding:0 9px 9px;flex-wrap:wrap}
+.setupForm label{font-size:11px;color:#435466;display:flex;flex-direction:column;gap:3px}
+.setupUrl{flex:1;min-width:320px}.setupUrl input{width:100%}
+.ownListingLine{display:grid;grid-template-columns:110px 120px 1fr;gap:10px;padding:8px 9px;border-top:1px solid #e0e5e9;align-items:center}
+.ownListingLine:first-of-type{border-top:0}
+.ownListingLine span{font-size:11px;color:#5d6b79}
+.confirmBack{z-index:450}.confirmModal{width:min(570px,94vw);background:#f6f6f6;border:1px solid #405c75;box-shadow:0 12px 32px rgba(0,0,0,.35)}
+.confirmCheck{display:flex;align-items:flex-start;gap:8px;margin:14px 0;padding:10px;border:1px solid #c8ab69;background:#fff8df;line-height:1.4}.confirmCheck input{height:auto;margin-top:2px}
+.confirmActions{display:flex;justify-content:flex-end;gap:7px;margin-top:16px}
+@media(max-width:850px){.queueFrame{max-height:68vh}.historyPopover{width:min(330px,calc(100vw - 28px))}.setupUrl{min-width:100%}.ownListingLine{grid-template-columns:1fr}.productActions{flex-direction:column}}
+.listingIdLine{display:flex;align-items:center;gap:5px}.ownTag{display:inline-block;padding:1px 4px;border:1px solid #6e95b5;background:#e6f1f9;color:#245b86;font-size:8px;font-weight:800;letter-spacing:.04em}
+
+/* COBALT V3.2 product CRM */
+.nullValue{color:#a5adb5;font-style:italic;font-size:10px;letter-spacing:.06em}.setupNeeded{color:#8a5d00;font-size:10px;font-weight:700}.crmModal{width:min(1180px,97vw)}.crmStatusBand{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:10px 11px;border:1px solid #9fb3c4;background:#f8fbfd}.crmStatusBand>div{display:flex;flex-direction:column;gap:3px}.crmStatusBand span{font-size:11px;color:#5d6b79}.crmTopGrid{margin-top:10px}.crmTitleCell{max-width:420px;text-align:left!important}.emptyCrm{padding:16px;color:#7a8793}.decisionExplain{margin-left:auto;color:#5d6b79;font-size:10px;max-width:430px;line-height:1.35}.crmForm{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:9px}.crmForm label{display:flex;flex-direction:column;gap:3px;font-size:10px;color:#5d6b79}.crmForm input,.crmForm select{width:100%}.crmNotesLabel{grid-column:1/-1}.crmForm textarea{min-height:78px;resize:vertical;border:1px solid #8fa1b2;padding:6px;font:inherit;color:#1d2732}.crmForm .classicButton{justify-self:start}.nullPanel{margin-top:10px;padding:13px;border:1px dashed #b5bdc5;background:#fafbfc;color:#6f7b86;display:flex;flex-direction:column;gap:4px}.nullPanel b{color:#5b6670}.compactMetrics .infoTip{vertical-align:0}.dataFrame th .infoTip{margin-left:3px}
+@media(max-width:850px){.crmForm{grid-template-columns:1fr}.crmNotesLabel{grid-column:auto}.decisionHeader{align-items:flex-start;flex-direction:column}.decisionExplain{margin-left:0}}
+
+/* COBALT V3.2.1 — sticky table labels */
+.queueFrame,.productFrame{overflow:auto;position:relative}
+.queueFrame{max-height:72vh}
+.productFrame{max-height:52vh}
+.queueFrame thead th,.productFrame thead th{position:sticky;top:0;z-index:30;background:#eef1f4;padding-top:11px!important;padding-bottom:11px!important;border-bottom:1px solid #8fa1b2;box-shadow:0 4px 7px -6px rgba(20,38,54,.85)}
+.queueFrame thead,.productFrame thead{position:relative;z-index:30}
+.queueFrame tbody tr:first-child td,.productFrame tbody tr:first-child td{border-top:0}
+@media(max-width:850px){.queueFrame{max-height:68vh}.productFrame{max-height:48vh}.queueFrame thead th,.productFrame thead th{padding-top:10px!important;padding-bottom:10px!important}}
+
+/* COBALT V3.3 — supplier CRM details */
+.supplierBox{margin-top:10px}
+.supplierForm{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:10px}
+.supplierForm label,.compactCrm label{display:flex;flex-direction:column;gap:4px;color:#536474;font-size:11px}
+.supplierForm input,.supplierForm select,.compactCrm input,.compactCrm select{width:100%;height:30px}
+.compactCrm{grid-template-columns:repeat(3,minmax(0,1fr))}
+.supplierNotes{grid-column:1/-1}
+.supplierNotes textarea{min-height:92px;width:100%;border:1px solid #8fa1b2;background:#fff;padding:7px;resize:vertical;font:inherit;color:#1d2732}
+.supplierSaveRow{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #d7dde3;padding-top:10px}
+@media(max-width:1100px){.supplierForm{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.supplierForm,.compactCrm{grid-template-columns:1fr}.supplierSaveRow{align-items:flex-start;flex-direction:column}}
+
+/* COBALT V3.4 — adaptive collection / recovery visibility */
+.manualRecoveryHint{margin-top:5px;padding:6px 8px;border-left:3px solid #5f87aa;background:#f3f8fc;color:#40566a;font-size:10px;line-height:1.35;max-width:900px}.finalizedSignal{color:#4d5c69;font-weight:700}.issueActions{display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap}
+
+.queueTable tbody tr.queueRow.queue-GOOD>td:first-child{box-shadow:inset 4px 0 #4d9a68}
+.queueTable tbody tr.queueRow.queue-WATCHING>td:first-child{box-shadow:inset 4px 0 #4f8fc2}
+.queueTable tbody tr.queueRow.queue-LOW-SIGNAL>td:first-child{box-shadow:inset 4px 0 #c49a2d}
+.queueTable tbody tr.queueRow.queue-TOO-EARLY>td:first-child{box-shadow:inset 4px 0 #9aa3ad}
+.queueTable tbody tr.queueRow.queue-MUST-HAVE>td:first-child{box-shadow:inset 4px 0 #238447}
+
+/* COBALT V3.5.4 — keep observation history popovers above table/frame chrome */
+.historyAnchor {
+  position: relative;
+  z-index: 20;
+}
+.historyAnchor:hover,
+.historyAnchor:focus-within {
+  z-index: 10020;
+}
+.historyPopover {
+  z-index: 10021 !important;
+}
+.dataFrame,
+.queueFrame {
+  isolation: auto;
+}
+
+/* COBALT V3.5.5 — render history cards outside scroll containers */
+.historyPopoverPortal{
+  position:fixed!important;
+  z-index:20000!important;
+  margin:0!important;
+}

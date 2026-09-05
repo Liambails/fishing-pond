@@ -1,11 +1,11 @@
-# Fishing Pond V2 architecture
+# COBALT architecture
 
-Fishing Pond V2 keeps the proven V1.5.2 extraction logic but separates collection, storage, scheduling, and analysis.
+COBALT keeps the proven V1.5.2 extraction logic but separates collection, storage, scheduling, and analysis.
 
 ```text
 Manual discovery in browser
         │
-        ├── Fishing Pond V2 extension ───────────────┐
+        ├── COBALT extension ───────────────┐
         │                                            │
         ▼                                            ▼
  Existing current-page collector.js            Vercel /api/ingest
