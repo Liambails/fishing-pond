@@ -90,24 +90,30 @@ def _activity_snapshot(observations):
 def adaptive_cadence_hours(listing, observations):
     """Evidence-driven cadence only. No anti-detection/stealth behavior."""
     a = _activity_snapshot(observations)
-    ownership = str((listing.get('metadata') or {}).get('ownership') or '').lower()
-    own = ownership == 'own'
-    if a['observation_count'] < 2:
-        hours = 12 if own else 24
-        reason = 'own listing baseline' if own else 'needs second observation'
-        return hours, reason, a
+    own = str((listing.get('metadata') or {}).get('ownership') or '').lower() == 'own'
+    n = a['observation_count']
 
-    vpd = a.get('views_per_day') or 0
-    bd = a.get('bid_delta') or 0
-    wd = a.get('watcher_delta') or 0
-    if vpd >= 12 or bd >= 2:
-        return 6, 'high view/bid activity', a
-    if vpd >= 6 or bd >= 1 or wd >= 2:
-        return 8, 'strong recent activity', a
-    if vpd >= 2 or wd >= 1 or own:
-        return 12, 'active listing' if not own else 'own listing tracking', a
+    # Initial learning ladder:
+    # capture #1 -> +6h -> #2 -> +6h -> #3 -> +12h -> #4.
+    # Shorter early intervals establish velocity before mature adaptive scheduling.
+    if n <= 1:
+        return 6, 'learning phase · second observation', a
+    if n == 2:
+        return 6, 'learning phase · confirm early velocity', a
+    if n == 3:
+        return 12, 'learning phase · establish first-day persistence', a
+
+    # Mature adaptive cadence. Raw total views are not a demand threshold.
+    v = a.get('views_per_day') or 0
+    b = a.get('bid_delta') or 0
+    w = a.get('watcher_delta') or 0
+    if v >= 12 or b >= 2:
+        return 6, 'high sustained view/bid activity', a
+    if v >= 6 or b >= 1 or w >= 2:
+        return 8, 'strong sustained activity', a
+    if v >= 2 or w >= 1 or own:
+        return 12, 'own listing tracking' if own else 'active listing', a
     return 24, 'low recent activity', a
-
 
 def final_verdict(observations, closure_reason=None):
     a = _activity_snapshot(observations)

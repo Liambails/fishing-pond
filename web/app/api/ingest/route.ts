@@ -13,10 +13,17 @@ function activity(rows:any[]){
 }
 function cadence(listing:any,rows:any[]){
   const a=activity(rows),own=String(listing?.metadata?.ownership||'').toLowerCase()==='own';
-  if(a.observation_count<2)return {hours:own?12:24,reason:own?'own listing baseline':'needs second observation',evidence:a};
+
+  // Initial learning ladder: capture #1 -> +6h -> #2 -> +6h -> #3 -> +12h -> #4.
+  // This establishes early velocity and persistence before mature adaptive scheduling.
+  if(a.observation_count<=1)return {hours:6,reason:'learning phase · second observation',evidence:a};
+  if(a.observation_count===2)return {hours:6,reason:'learning phase · confirm early velocity',evidence:a};
+  if(a.observation_count===3)return {hours:12,reason:'learning phase · establish first-day persistence',evidence:a};
+
+  // Mature adaptive cadence. Raw view totals alone never determine performance.
   const v=a.views_per_day||0,b=a.bid_delta||0,w=a.watcher_delta||0;
-  if(v>=12||b>=2)return {hours:6,reason:'high view/bid activity',evidence:a};
-  if(v>=6||b>=1||w>=2)return {hours:8,reason:'strong recent activity',evidence:a};
+  if(v>=12||b>=2)return {hours:6,reason:'high sustained view/bid activity',evidence:a};
+  if(v>=6||b>=1||w>=2)return {hours:8,reason:'strong sustained activity',evidence:a};
   if(v>=2||w>=1||own)return {hours:12,reason:own?'own listing tracking':'active listing',evidence:a};
   return {hours:24,reason:'low recent activity',evidence:a};
 }
