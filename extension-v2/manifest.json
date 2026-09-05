@@ -1,13 +1,43 @@
 {
   "manifest_version": 3,
   "name": "Fishing Pond V2 Capture",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "One-click capture of the Trade Me listing currently open, stored in Fishing Pond V2.",
-  "permissions": ["activeTab", "storage"],
-  "host_permissions": ["https://www.trademe.co.nz/*", "http://127.0.0.1:8765/*", "https://*/*"],
-  "content_scripts": [{"matches":["https://www.trademe.co.nz/*"],"js":["collector.js","content.js"],"run_at":"document_idle"}],
-  "action": {"default_title":"Fishing Pond V2"},
-  "commands": {"capture-current-listing":{"suggested_key":{"default":"Alt+Shift+F","mac":"Alt+Shift+F"},"description":"Capture current Trade Me listing"}},
-  "background": {"service_worker":"background.js"},
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.trademe.co.nz/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.trademe.co.nz/*"
+      ],
+      "js": [
+        "collector.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Fishing Pond V2"
+  },
+  "commands": {
+    "capture-current-listing": {
+      "suggested_key": {
+        "default": "Alt+Shift+F",
+        "mac": "Alt+Shift+F"
+      },
+      "description": "Capture current Trade Me listing"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
   "options_page": "options.html"
 }
