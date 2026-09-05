@@ -3,6 +3,7 @@ import os
 import sys
 import urllib.parse
 import urllib.request
+import time
 from datetime import datetime, timezone
 
 url=os.environ.get("SUPABASE_URL", "").rstrip("/")
@@ -42,8 +43,22 @@ req=urllib.request.Request(
     f"{url}/rest/v1/listings?{query}",
     headers={"apikey":key,"Authorization":f"Bearer {key}","Accept":"application/json"},
 )
-with urllib.request.urlopen(req, timeout=20) as res:
-    rows=json.loads(res.read().decode("utf-8"))
+rows=None
+last_error=None
+for attempt in range(1, 5):
+    try:
+        with urllib.request.urlopen(req, timeout=25) as res:
+            rows=json.loads(res.read().decode("utf-8"))
+        break
+    except Exception as e:
+        last_error=e
+        if attempt == 4:
+            raise
+        delay=attempt * 5
+        print(f"Due query failed (attempt {attempt}/4): {e}; retrying in {delay}s", file=sys.stderr)
+        time.sleep(delay)
+if rows is None:
+    raise RuntimeError(f"Due query failed: {last_error}")
 
 due=bool(rows)
 candidate=rows[0] if rows else None

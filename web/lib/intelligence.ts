@@ -275,25 +275,67 @@ export function computeListingSignal(listing:Listing, peers:Listing[]=[]){
   return computeListingSignals(all)[0];
 }
 
+function comparablePriceWeight(listing:any){
+  const raw=Number(listing?.comparableMatch?.match_score);
+  if(Number.isFinite(raw)){
+    // Calibrated so ~98% match => 1.00, 91% => 0.82, 76% => 0.42.
+    // Hard compatibility gates have already run in comparableMatcher; this only
+    // controls how strongly an accepted comparable influences market pricing.
+    return clamp((raw-.60)/.38,.25,1);
+  }
+  const method=String(listing?.comparableMatch?.match_method||'');
+  if(method==='manual-accept')return .9;
+  // Legacy/explicit product links without V3.9 provenance remain usable but do
+  // not receive more weight than a high-confidence automatically matched peer.
+  return .75;
+}
+
+function weightedQuantile(rows:{value:number,weight:number}[],q:number){
+  if(!rows.length)return null;
+  const sorted=[...rows].filter(x=>Number.isFinite(x.value)&&Number.isFinite(x.weight)&&x.weight>0).sort((a,b)=>a.value-b.value);
+  if(!sorted.length)return null;
+  const total=sorted.reduce((s,x)=>s+x.weight,0);
+  const target=clamp(q,0,1)*total;
+  let cumulative=0;
+  for(const row of sorted){cumulative+=row.weight;if(cumulative>=target)return row.value;}
+  return sorted.at(-1)!.value;
+}
+
 export function computeProductMetrics(product:any, listings:Listing[]){
   const active=listings.filter(x=>x.active);
-  const latest=active.map(l=>chronological(l.observations||[]).at(-1)).filter(Boolean) as Obs[];
-  const prices=latest.map(priceOf).filter((x):x is number=>typeof x==='number');
-  const views=latest.map(x=>x.views).filter((x):x is number=>typeof x==='number');
+  const latestByListing=active.map(l=>({listing:l,obs:chronological(l.observations||[]).at(-1)})).filter(x=>Boolean(x.obs)) as {listing:any,obs:Obs}[];
+  const prices=latestByListing.map(x=>priceOf(x.obs)).filter((x):x is number=>typeof x==='number');
+  const weightedPrices=latestByListing.map(x=>({value:priceOf(x.obs),weight:comparablePriceWeight(x.listing),score:Number(x.listing?.comparableMatch?.match_score)})).filter((x):x is {value:number,weight:number,score:number}=>typeof x.value==='number');
+  const views=latestByListing.map(x=>x.obs.views).filter((x):x is number=>typeof x==='number');
   const velocities=active.map(l=>recentVelocity(l.observations)).filter((x):x is number=>x!=null);
   const sellers=new Set(active.map(x=>x.seller).filter(Boolean));
-  const medPrice=median(prices); const medViews=median(views); const avgVelocity=velocities.length?velocities.reduce((a,b)=>a+b,0)/velocities.length:null;
-  const evidence=Math.min(100, active.length*8 + Math.min(30,latest.length*3) + Math.min(20,velocities.length*5));
+  const medPrice=median(prices);
+  const weightedMarketPrice=weightedQuantile(weightedPrices,.50);
+  const weightedLow=weightedQuantile(weightedPrices,.20);
+  const weightedHigh=weightedQuantile(weightedPrices,.80);
+  const medViews=median(views); const avgVelocity=velocities.length?velocities.reduce((a,b)=>a+b,0)/velocities.length:null;
+  const evidence=Math.min(100, active.length*8 + Math.min(30,latestByListing.length*3) + Math.min(20,velocities.length*5));
   const demand=clamp(35 + Math.min(35,(avgVelocity||0)*8) + Math.min(20,(medViews||0)*.7) + Math.min(10,active.length));
   const competition=clamp(72 - Math.max(0,active.length-5)*4 + Math.min(18,sellers.size*3));
   const landed=Number(product.landed_cost_nzd ?? product.target_landed_cost_nzd ?? 0);
-  const margin=medPrice&&landed?clamp(((medPrice-landed)/medPrice)*115):50;
+  const pricingAnchor=weightedMarketPrice ?? medPrice;
+  const margin=pricingAnchor&&landed?clamp(((pricingAnchor-landed)/pricingAnchor)*115):50;
   const fitment=Number(product.fitment_score ?? 50);
   const supplier=Number(product.supplier_readiness_score ?? 20);
   const risk=Number(product.operational_risk_score ?? 25);
   const score=clamp(demand*.28+competition*.14+margin*.22+evidence*.16+fitment*.10+supplier*.10-risk*.08);
   const verdict=score>=80?'STRONG':score>=67?'PROMISING':score>=52?'WATCH':'WEAK';
-  const suggested=medPrice?round(medPrice*.86,2):null;
+  const suggested=pricingAnchor?round(pricingAnchor*.86,2):null;
   const floor=landed?round(landed/Math.max(.25,1-Number(product.marketplace_fee_pct||0)/100-.35),2):null;
-  return { listingCount:active.length,sellerCount:sellers.size,medianPrice:medPrice,medianViews:medViews,avgViewVelocity:avgVelocity==null?null:round(avgVelocity,2), demand:round(demand),competition:round(competition),margin:round(margin),confidence:round(evidence),fitment:round(fitment),supplier:round(supplier),risk:round(risk),score:round(score),verdict,suggestedPrice:suggested,priceFloor:floor,priceRange:prices.length?{min:Math.min(...prices),max:Math.max(...prices)}:null };
+  const pricedComparableCount=weightedPrices.length;
+  const similarityScoredPriceCount=weightedPrices.filter(x=>Number.isFinite(x.score)).length;
+  return {
+    listingCount:active.length,sellerCount:sellers.size,
+    medianPrice:medPrice,weightedMarketPrice:weightedMarketPrice==null?null:round(weightedMarketPrice,2),
+    weightedPriceRange:weightedLow==null||weightedHigh==null?null:{min:round(weightedLow,2),max:round(weightedHigh,2)},
+    pricingMethod:'similarity-weighted robust market',pricedComparableCount,similarityScoredPriceCount,
+    medianViews:medViews,avgViewVelocity:avgVelocity==null?null:round(avgVelocity,2),
+    demand:round(demand),competition:round(competition),margin:round(margin),confidence:round(evidence),fitment:round(fitment),supplier:round(supplier),risk:round(risk),score:round(score),verdict,
+    suggestedPrice:suggested,priceFloor:floor,priceRange:prices.length?{min:Math.min(...prices),max:Math.max(...prices)}:null
+  };
 }

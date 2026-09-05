@@ -1,5 +1,6 @@
 import {NextResponse} from 'next/server';
 import {adminClient} from '../../../lib/supabase';
+import {reconcileProduct} from '../../../lib/comparableMatcher';
 
 function infer(title=''){
  const t=title.toLowerCase();
@@ -37,7 +38,8 @@ export async function POST(req:Request){
   if(error)throw error;
   await db.from('product_listings').insert((chosen||[]).map((l:any)=>({product_id:p.id,listing_uuid:l.id,role:'competitor'})));
   await db.from('listings').update({product_id:p.id}).in('id',listingIds);
-  return NextResponse.json({ok:true,product:p});
+  const matching=await reconcileProduct(db,p);
+  return NextResponse.json({ok:true,product:p,matching});
  }catch(e:any){return NextResponse.json({error:e.message||'Unable to create product'},{status:500})}
 }
 

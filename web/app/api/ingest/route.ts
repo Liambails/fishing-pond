@@ -1,5 +1,6 @@
 import { adminClient } from '../../../lib/supabase';
 import { detectMarketplace } from '../../../lib/marketplaces';
+import { matchListingIncrementally } from '../../../lib/comparableMatcher';
 
 function asNum(v: unknown) { if (v === null || v === undefined || v === '') return null; const n=Number(v); return Number.isFinite(n)?n:null; }
 function asIso(v: unknown) { if (!v) return null; const d=new Date(String(v)); return Number.isNaN(d.getTime())?null:d.toISOString(); }
@@ -107,5 +108,9 @@ export async function POST(req: Request) {
   // A successful manual capture is explicit recovery evidence for previous collection failures on this canonical listing.
   await db.from('collection_errors').update({status:'resolved',resolved_at:capturedAt,recovered_at:capturedAt,recovery_source:String(raw.capture_source||'extension-manual'),resolution_note:'Recovered by successful COBALT manual capture.'}).eq('listing_uuid',listing.id).eq('status','open');
 
-  return json({ok:true,marketplace:identity.marketplace,listing_id:identity.listingId,continued:Boolean(existing),observation_saved:true,next_observation_at:next,observation_interval_hours:interval,cadence_reason:cadenceReason,final_verdict:finalVerdict});
+  // Incremental comparable-market matching. This considers only blocked candidate products, not every product in the database.
+  let comparableMatch={autoLinked:0,review:0};
+  try{comparableMatch=await matchListingIncrementally(db,{...listing,metadata},{...observation,raw_snapshot:raw})}catch(e){console.error('Comparable matcher failed',e)}
+
+  return json({ok:true,marketplace:identity.marketplace,listing_id:identity.listingId,continued:Boolean(existing),observation_saved:true,next_observation_at:next,observation_interval_hours:interval,cadence_reason:cadenceReason,final_verdict:finalVerdict,comparable_match:comparableMatch});
 }

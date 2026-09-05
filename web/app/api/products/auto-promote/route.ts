@@ -1,5 +1,6 @@
 import {NextResponse} from 'next/server';
 import {adminClient} from '../../../../lib/supabase';
+import {reconcileProduct} from '../../../../lib/comparableMatcher';
 
 function infer(title=''){
  const t=title.toLowerCase();
@@ -38,6 +39,7 @@ export async function POST(req:Request){
    const ids=groupRows.map((l:any)=>l.id);
    const {error:ue}=await db.from('listings').update({product_id:p.id}).in('id',ids);if(ue)throw ue;
    linkedListings+=ids.length;
+   await reconcileProduct(db,p);
   }
   return NextResponse.json({ok:true,createdProducts,linkedListings});
  }catch(e:any){return NextResponse.json({error:e.message||'Auto-promotion failed'},{status:500})}

@@ -12,14 +12,15 @@ function observationSpanHours(listing:any){
 
 export default async function Page(){
  const db=adminClient();
- const [{data:products},{data:listings},{data:obs},{data:errors},{data:events},{data:links},{data:ownListings}]=await Promise.all([
+ const [{data:products},{data:listings},{data:obs},{data:errors},{data:events},{data:links},{data:ownListings},{data:matchCandidates}]=await Promise.all([
   db.from('products').select('*').is('archived_at',null).order('priority',{ascending:false}).limit(100),
   db.from('listings').select('*').order('next_observation_at',{ascending:true}).limit(250),
   db.from('observations').select('listing_uuid,captured_at,views,watchers,bids,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,close_date,close_remaining').order('captured_at',{ascending:false}).limit(5000),
   db.from('collection_errors').select('*').order('occurred_at',{ascending:false}).limit(150),
   db.from('system_events').select('*').order('occurred_at',{ascending:false}).limit(150),
   db.from('product_listings').select('*'),
-  db.from('own_listings').select('*').eq('active',true)
+  db.from('own_listings').select('*').eq('active',true),
+  db.from('product_match_candidates').select('*').in('status',['review','accepted','auto_linked'])
  ]);
  const baseLs=(listings||[]).map((l:any)=>({...l,observations:(obs||[]).filter((o:any)=>o.listing_uuid===l.id).slice(0,40)}));
  const signals=computeListingSignals(baseLs);
@@ -28,7 +29,7 @@ export default async function Page(){
   const productLinks=(links||[]).filter((x:any)=>x.product_id===p.id);
   const competitorIds=new Set(productLinks.filter((x:any)=>x.role!=='own').map((x:any)=>x.listing_uuid));
   const ownIds=new Set(productLinks.filter((x:any)=>x.role==='own').map((x:any)=>x.listing_uuid));
-  const competitorListings=ls.filter((l:any)=>competitorIds.has(l.id)||(!ownIds.has(l.id)&&l.product_id===p.id));
+  const competitorListings=ls.filter((l:any)=>competitorIds.has(l.id)||(!ownIds.has(l.id)&&l.product_id===p.id)).map((l:any)=>({...l,comparableMatch:productLinks.find((x:any)=>x.listing_uuid===l.id)||null}));
   const ownCanonicalListings=ls.filter((l:any)=>ownIds.has(l.id));
   const own=(ownListings||[]).filter((x:any)=>x.product_id===p.id);
   const marketMetrics=computeProductMetrics(p,competitorListings);
@@ -56,7 +57,7 @@ export default async function Page(){
   const name=p.display_name||sourceListing?.title||[p.vehicle_make,p.vehicle_model,p.chassis,p.part_type].filter(Boolean).join(' ')||p.part_type||p.slug||'Untitled product';
   return {
     ...p,
-    name,sourceListing,listings:competitorListings,ownListings:own,ownCanonicalListings,ownPrimary,
+    name,sourceListing,listings:competitorListings,reviewMatches:(matchCandidates||[]).filter((m:any)=>m.product_id===p.id&&m.status==='review').map((m:any)=>({...m,listing:ls.find((l:any)=>l.id===m.listing_uuid)})).filter((m:any)=>m.listing),ownListings:own,ownCanonicalListings,ownPrimary,
     ownObservationCount:ownObsCount,ownObservationSpanHours:ownSpanHours,readyForScoring,peerMedianVelocity,performanceRatio,
     metrics:{...marketMetrics,verdict,score:performanceScore,confidence}
   };
