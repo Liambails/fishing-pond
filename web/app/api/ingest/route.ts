@@ -30,15 +30,34 @@ function finalise(rows:any[],reason:string){
   return {verdict,score,evidence:a};
 }
 
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': 'https://www.trademe.co.nz',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Cobalt-Token, X-Fishing-Pond-Token',
+  'Access-Control-Max-Age': '86400',
+  'Vary': 'Origin',
+};
+
+function json(data: unknown, init: ResponseInit = {}) {
+  return Response.json(data, {
+    ...init,
+    headers: { ...CORS_HEADERS, ...(init.headers || {}) },
+  });
+}
+
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
 export async function POST(req: Request) {
   const expected = process.env.COBALT_INGEST_TOKEN || process.env.FISHING_POND_INGEST_TOKEN;
   const got = req.headers.get('x-cobalt-token') || req.headers.get('x-fishing-pond-token');
-  if (!expected || got !== expected) return Response.json({ ok:false,error:'Unauthorized' }, { status:401 });
+  if (!expected || got !== expected) return json({ ok:false,error:'Unauthorized' }, { status:401 });
   const raw = await req.json();
-  if (!raw?.url) return Response.json({ok:false,error:'url is required'}, {status:400});
+  if (!raw?.url) return json({ok:false,error:'url is required'}, {status:400});
   let identity;
-  try{identity=detectMarketplace(String(raw.url),raw.marketplace,raw.listing_id?String(raw.listing_id):null)}catch{return Response.json({ok:false,error:'Invalid listing URL'},{status:400})}
-  if(!identity.listingId)return Response.json({ok:false,error:'Could not determine marketplace listing ID'},{status:400});
+  try{identity=detectMarketplace(String(raw.url),raw.marketplace,raw.listing_id?String(raw.listing_id):null)}catch{return json({ok:false,error:'Invalid listing URL'},{status:400})}
+  if(!identity.listingId)return json({ok:false,error:'Could not determine marketplace listing ID'},{status:400});
 
   const db=adminClient();
   const capturedAt=asIso(raw.captured_at) ?? new Date().toISOString();
@@ -50,7 +69,7 @@ export async function POST(req: Request) {
     last_seen:capturedAt,last_observed_at:capturedAt,metadata
   };
   const {data:listing,error:upErr}=await db.from('listings').upsert(listingPayload,{onConflict:'marketplace,listing_id'}).select('*').single();
-  if(upErr||!listing)return Response.json({ok:false,error:upErr?.message||'Listing upsert failed'},{status:500});
+  if(upErr||!listing)return json({ok:false,error:upErr?.message||'Listing upsert failed'},{status:500});
 
   const q=raw.extraction_quality||{};
   const observation:any={
@@ -64,7 +83,7 @@ export async function POST(req: Request) {
     extraction_score:q.score??raw.extraction_score??null,quality_flags:q.warnings??raw.quality_flags??[],raw_snapshot:raw
   };
   const {error:obsErr}=await db.from('observations').upsert(observation,{onConflict:'listing_uuid,captured_at'});
-  if(obsErr)return Response.json({ok:false,error:obsErr.message},{status:500});
+  if(obsErr)return json({ok:false,error:obsErr.message},{status:500});
   const {data:history}=await db.from('observations').select('captured_at,views,watchers,bids').eq('listing_uuid',listing.id).order('captured_at',{ascending:false}).limit(12);
 
   const isEnded=Boolean(raw.listing_ended); let next:string|null=null; let interval:number|null=null; let cadenceReason='listing finalized'; let finalVerdict:string|null=null;
@@ -81,5 +100,5 @@ export async function POST(req: Request) {
   // A successful manual capture is explicit recovery evidence for previous collection failures on this canonical listing.
   await db.from('collection_errors').update({status:'resolved',resolved_at:capturedAt,recovered_at:capturedAt,recovery_source:String(raw.capture_source||'extension-manual'),resolution_note:'Recovered by successful COBALT manual capture.'}).eq('listing_uuid',listing.id).eq('status','open');
 
-  return Response.json({ok:true,marketplace:identity.marketplace,listing_id:identity.listingId,continued:Boolean(existing),observation_saved:true,next_observation_at:next,observation_interval_hours:interval,cadence_reason:cadenceReason,final_verdict:finalVerdict});
+  return json({ok:true,marketplace:identity.marketplace,listing_id:identity.listingId,continued:Boolean(existing),observation_saved:true,next_observation_at:next,observation_interval_hours:interval,cadence_reason:cadenceReason,final_verdict:finalVerdict});
 }
