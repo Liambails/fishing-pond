@@ -135,3 +135,27 @@
   z-index:20000!important;
   margin:0!important;
 }
+
+
+/* V3.8 automation / database activity window */
+.automationMetric{font-weight:700}
+.opsModal{width:min(1180px,94vw);max-height:88vh}
+.opsIntro{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;padding:12px 0 18px;border-bottom:1px solid #cad5df}
+.opsIntro>div{display:flex;flex-direction:column;gap:4px}.opsIntro span{color:#5f6f7e;font-size:13px}
+.opsSubhead{font-size:14px;margin:20px 0 8px;color:#243c53;text-transform:uppercase;letter-spacing:.04em}
+.opsCounts{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));border:1px solid #c4d0db;background:#f7f9fb}
+.opsCount{padding:11px 12px;border-right:1px solid #d5dde5;border-bottom:1px solid #d5dde5;display:flex;flex-direction:column;gap:2px}
+.opsCount b{font-size:18px;color:#173f62}.opsCount span{font-size:11px;text-transform:uppercase;color:#6c7a86}
+.opsLegend{display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:#61717f;margin-bottom:8px}
+.opsLegend span{display:flex;align-items:center;gap:5px}.opsDot{width:8px;height:8px;border-radius:50%;background:#64748b}.opsDot.auto{background:#2563eb}.opsDot.worker{background:#16835f}.opsDot.manual{background:#8b5cf6}
+.opsLog{border:1px solid #bac8d4;max-height:390px;overflow:auto;background:#fff}
+.opsLogRow{display:grid;grid-template-columns:128px 110px 1fr;border-bottom:1px solid #d8e0e7;min-height:50px}
+.opsLogRow:last-child{border-bottom:0}.opsLogRow.failed{background:#fff4f1}
+.opsTime,.opsSource,.opsMessage{padding:9px 10px}.opsTime{font-size:12px;color:#526473;border-right:1px solid #d8e0e7}
+.opsSource{font-size:10px;font-weight:800;letter-spacing:.04em;border-right:1px solid #d8e0e7;color:#334155}
+.opsSource.auto-check{color:#1d4ed8}.opsSource.auto-worker{color:#087457}.opsSource.manual{color:#6d28d9}
+.opsMessage{font-size:12px;color:#33475a}.opsMessage>span{color:#61717f}
+.opsDetails{display:flex;flex-direction:column;margin-top:4px;gap:2px}.opsDetails span{font-size:11px}
+.opsDetails a{color:#0b61b5;text-decoration:underline;font-weight:700}
+.detailFail{color:#a13d2f}.detailOk{color:#526473}
+@media(max-width:720px){.opsLogRow{grid-template-columns:95px 90px 1fr}.opsCounts{grid-template-columns:repeat(2,1fr)}}

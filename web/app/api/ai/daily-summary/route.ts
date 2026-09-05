@@ -1,8 +1,9 @@
+import {nzCalendarDay} from '../../../../lib/time';
 import {NextResponse} from 'next/server';
 import {adminClient} from '../../../../lib/supabase';
 import {computeListingSignals,computeProductMetrics} from '../../../../lib/intelligence';
 function extractText(j:any){if(typeof j.output_text==='string')return j.output_text;for(const o of j.output||[])for(const c of o.content||[])if(c.type==='output_text'&&c.text)return c.text;return ''}
-const nzDay=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Pacific/Auckland',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+const nzDay=()=>nzCalendarDay();
 function drastic(oldS:any,newS:any){if(!oldS||oldS.summary_version!==newS.summary_version)return true;return oldS.product_count!==newS.product_count||oldS.strong_count!==newS.strong_count||Math.abs((oldS.open_issues||0)-(newS.open_issues||0))>=2||Math.abs((oldS.good||0)-(newS.good||0))>=2||Math.abs((oldS.watching||0)-(newS.watching||0))>=3||Math.abs((oldS.failed_listings||0)-(newS.failed_listings||0))>=2}
 export async function POST(req:Request){
  try{

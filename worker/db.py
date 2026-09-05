@@ -150,6 +150,10 @@ def _recent_observations(db, listing_uuid, limit=12):
 
 def save_success(listing, raw):
     db = client()
+    # Persist provenance with every automatic observation so dashboard diagnostics
+    # can distinguish GitHub-worker captures from manual Chrome-extension captures.
+    raw = dict(raw or {})
+    raw['capture_source'] = 'worker-auto'
     lid = listing['id']
     captured = raw.get('captured_at') or datetime.now(timezone.utc).isoformat()
     q = raw.get('extraction_quality') or {}

@@ -1,11 +1,12 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
+import {formatNZDateTime,formatNZShort} from '../lib/time';
 
 type Props={products:any[]; listings:any[]; interventions:any[]; systemEvents:any[]; aiEnabled:boolean};
 const fmt=(n:any,prefix='')=>n==null?'—':prefix+Number(n).toLocaleString(undefined,{maximumFractionDigits:2});
-const date=(s:any)=>s?new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23',timeZone:'Pacific/Auckland'}).format(new Date(s)):'—';
-const shortDate=(s:any)=>s?new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23',timeZone:'Pacific/Auckland'}).format(new Date(s)):'—';
+const date=(s:any)=>s?formatNZDateTime(s):'—';
+const shortDate=(s:any)=>s?formatNZShort(s):'—';
 const closeText=(signal:any,nowMs:number|null)=>{if(!signal?.closeDate||nowMs==null)return '—';const ms=Date.parse(signal.closeDate)-nowMs;if(!Number.isFinite(ms))return '—';if(ms<=0)return 'Ended';const h=ms/3600000;return h<48?`${Math.ceil(h)}h left`:`${Math.ceil(h/24)}d left`};
 const obsNewest=(x:any)=>[...(x?.observations||[])].filter((o:any)=>o.captured_at).sort((a:any,b:any)=>Date.parse(b.captured_at)-Date.parse(a.captured_at));
 const obsPrice=(o:any)=>o?.buy_now_nzd??o?.asking_price_nzd??o?.current_bid_nzd??null;
@@ -64,6 +65,9 @@ export default function Dashboard({products,listings,interventions:initialErrors
  const [dailyBrief,setDailyBrief]=useState<any>(null);
  const [selectionReview,setSelectionReview]=useState<any>(null);
  const [clock,setClock]=useState<Date|null>(null);
+ const [opsOpen,setOpsOpen]=useState(false);
+ const [opsLoading,setOpsLoading]=useState(false);
+ const [opsData,setOpsData]=useState<any>(null);
  const [deleteTarget,setDeleteTarget]=useState<any>(null);
  const [deleteConfirmed,setDeleteConfirmed]=useState(false);
  const [ownMarketplace,setOwnMarketplace]=useState('Trade Me');
@@ -94,6 +98,24 @@ export default function Dashboard({products,listings,interventions:initialErrors
    else {setQueueFreshness('ALL');setQueueSignal('ALL')}
    requestAnimationFrame(()=>scrollTo(observationRef.current));
  }
+ async function openAutomationLog(){
+   setOpsOpen(true);setOpsLoading(true);
+   try{
+     const r=await fetch('/api/system/status',{cache:'no-store'});
+     const j=await r.json();
+     if(!r.ok)throw new Error(j.error||'Unable to load automation status');
+     setOpsData(j);
+   }catch(e:any){setOpsData({ok:false,error:e?.message||String(e)})}
+   finally{setOpsLoading(false)}
+ }
+ const opsLabel=(source:any,kind:any)=>{
+   const s=String(source||'').toLowerCase();
+   if(kind==='manual'||s.includes('manual')||s.includes('extension'))return 'MANUAL';
+   if(kind==='scheduler'||s.includes('scheduler-check'))return 'AUTO CHECK';
+   if(s.includes('github-actions')||s.includes('worker'))return 'AUTO WORKER';
+   return 'SYSTEM';
+ };
+ const activityDetails=(row:any)=>Array.isArray(row?.details)?row.details:[];
  function openProduct(p:any){
    setSelected(p);setOwnListingUrl('');setOwnMarketplace(p.ownListings?.[0]?.marketplace||'Trade Me');
    setCrmStage(p.status||'incomplete');setSupplierName(p.supplier_name||'');setSupplierStatus(p.supplier_status||'not_contacted');
@@ -147,12 +169,12 @@ export default function Dashboard({products,listings,interventions:initialErrors
  async function archiveProduct(){if(!deleteTarget)return;const activeOwn=(deleteTarget.ownListings||[]).filter((x:any)=>x.active!==false);const needsConfirm=activeOwn.length>0;if(needsConfirm&&!deleteConfirmed)return;setBusy(true);const r=await fetch('/api/products',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({productId:deleteTarget.id,action:'archive',marketplaceClosedConfirmed:needsConfirm?deleteConfirmed:false})});const j=await r.json();setBusy(false);if(!r.ok)return alert(j.error||'Unable to remove product');setDeleteTarget(null);setDeleteConfirmed(false);location.reload()}
 
  return <main className="appShell">
-  <header className="appHeader"><div><div className="brandSmall">MOTERA RESEARCH LAB</div><div className="brandTitle cobaltWordmark">COBALT <span>V3.7</span></div></div><div className="headerMeta headerClock">{clock?new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(clock):'—'}</div></header>
+  <header className="appHeader"><div><div className="brandSmall">MOTERA RESEARCH LAB</div><div className="brandTitle cobaltWordmark">COBALT <span>V3.8.1</span></div></div><div className="headerMeta headerClock">{clock?formatNZDateTime(clock,true):'—'}</div></header>
 
   <section className="overviewSection">
    <div className="overviewTitleRow"><div className="overviewHeading"><h1>Overview</h1></div></div>
    <p className="overviewText">{dailyBrief?.summary||fallbackBrief}</p>
-   <div className="summaryStrip"><button className="metricLink" onClick={()=>scrollTo(productsRef.current)}><b>{products.length}</b> Products</button><button className="metricLink" onClick={()=>openObservation('ALL')}><b>{listings.length}</b> listings being observed</button><button className="metricLink" onClick={()=>openObservation('NEW')}><b>{new24}</b> New listings in 24h</button><button className={`metricLink ${attention>0?'hasIssues':''}`} onClick={()=>requestAnimationFrame(()=>document.getElementById('issues-to-resolve')?.scrollIntoView({behavior:'smooth',block:'start'}))}><b>{attention}</b> Issues to resolve</button><button className="metricLink" onClick={()=>openObservation('PROSPECT')}><b>{prospects}</b> Prospect listings</button></div>
+   <div className="summaryStrip"><button className="metricLink" onClick={()=>scrollTo(productsRef.current)}><b>{products.length}</b> Products</button><button className="metricLink" onClick={()=>openObservation('ALL')}><b>{listings.length}</b> listings being observed</button><button className="metricLink" onClick={()=>openObservation('NEW')}><b>{new24}</b> New listings in 24h</button><button className={`metricLink ${attention>0?'hasIssues':''}`} onClick={()=>requestAnimationFrame(()=>document.getElementById('issues-to-resolve')?.scrollIntoView({behavior:'smooth',block:'start'}))}><b>{attention}</b> Issues to resolve</button><button className="metricLink" onClick={()=>openObservation('PROSPECT')}><b>{prospects}</b> Prospect listings</button><button className="metricLink automationMetric" onClick={openAutomationLog}><b>↻</b> Automation logs</button></div>
    {!aiEnabled&&<div className="inlineNote">AI summaries are off locally. Add <code>OPENAI_API_KEY</code> to <code>web/.env.local</code> and restart the dev server.</div>}
   </section>
 
@@ -189,6 +211,31 @@ export default function Dashboard({products,listings,interventions:initialErrors
   <section id="issues-to-resolve" className="panelSection issuePanel sectionAnchor"><div className="sectionBar"><div><h2>Issues to resolve ({attention})</h2><div className="sectionHint">Collection and application problems affecting the dashboard.</div></div></div><div className="filterBar"><label>Status <select value={issueFilter} onChange={e=>setIssueFilter(e.target.value)}><option value="OPEN">Open</option><option value="RESOLVED">Resolved</option><option value="DISMISSED">Dismissed</option><option value="ALL">All</option></select></label><label>Type <select value={issueKind} onChange={e=>setIssueKind(e.target.value)}><option value="ALL">All</option><option value="COLLECTION">Marketplace collection</option><option value="SYSTEM">Application / system</option></select></label></div><div className="issueList">{combinedIssues.slice(0,50).map(x=><div className="issueRow" key={`${x._kind}-${x.id}`}><div className="issueType">{x._kind==='SYSTEM'?'SYSTEM':'COLLECT'}</div><div className="issueMain"><b>{x.error_type||'error'}</b>{x.marketplace&&<> · {x.marketplace}</>}{x.listing_id&&<> · #{x.listing_id}</>}<div className="secondary issueMessage">{x.error_message||'Unknown error'}</div>{x._kind==='COLLECTION'&&<div className="manualRecoveryHint">{Number(x.consecutive_failures||0)>=3?'Automatic collection paused after 3 consecutive failures. ':Number(x.consecutive_failures||0)>0?`Automatic retry ${Math.min(Number(x.consecutive_failures||0)+1,3)}/3 is pending. `:''}Manual recovery: open the listing in your normal browser, complete any marketplace verification if required, then click <b>COBALT · Capture</b>. A successful capture continues this same listing history and automatically reschedules it.</div>}<div className="secondary">{date(x.occurred_at)}</div></div><div className="issueActions">{x._kind==='COLLECTION'&&x.requested_url&&<a className="classicButton primaryButton" href={x.requested_url} target="_blank" rel="noreferrer">Open for manual capture</a>}<button className="classicButton" onClick={()=>resolveIssue(x,'resolved')}>Resolve</button><button className="classicButton" onClick={()=>resolveIssue(x,'dismissed')}>Dismiss</button></div></div>)}{!combinedIssues.length&&<div className="emptyCell">No issues match the current filters.</div>}</div></section>
 
   <footer className="utilityFooter"><span>Navigation</span><a href="https://motera.co.nz" target="_blank" rel="noreferrer"><i className="navIcon">⌂</i>Motera</a><a href="https://www.alibaba.com" target="_blank" rel="noreferrer"><i className="navIcon">A</i>Alibaba</a><a href="https://www.trademe.co.nz" target="_blank" rel="noreferrer"><i className="navIcon">TM</i>Trade Me</a><a href="https://github.com/Liambails/fishing-pond" target="_blank" rel="noreferrer"><i className="navIcon">GH</i>GitHub</a><span className="legacyTag">COBALT · formerly Fishing Pond</span></footer>
+
+  {opsOpen&&<div className="modalBack" onMouseDown={e=>{if(e.target===e.currentTarget)setOpsOpen(false)}}><div className="modal opsModal"><div className="modalTitleBar"><div><span className="windowKicker">AUTOMATION / DATABASE</span><h2>COBALT activity log</h2></div><button className="windowClose" onClick={()=>setOpsOpen(false)}>×</button></div><div className="modalBody">
+   <div className="opsIntro"><div><b>Automatic vs manual collection</b><span>Scheduler wake-ups, automatic browser runs and explicit extension captures are shown separately. Times below are New Zealand time.</span></div><button className="smallBtn" disabled={opsLoading} onClick={openAutomationLog}>{opsLoading?'Refreshing…':'Refresh'}</button></div>
+   {opsLoading&&!opsData&&<div className="emptyState">Loading automation history…</div>}
+   {opsData?.error&&<div className="inlineNote errorNote">{opsData.error}</div>}
+   {opsData?.counts&&<><h3 className="opsSubhead">Database table counts</h3><div className="opsCounts">{Object.entries(opsData.counts).map(([k,v]:any)=><div className="opsCount" key={k}><b>{v==null?'—':Number(v).toLocaleString()}</b><span>{String(k).replaceAll('_',' ')}</span></div>)}</div></>}
+   {opsData?.activity&&<><h3 className="opsSubhead">Latest activity</h3><div className="opsLegend"><span><i className="opsDot auto"></i>AUTO CHECK = GitHub scheduler woke up</span><span><i className="opsDot worker"></i>AUTO WORKER = Python browser collector ran</span><span><i className="opsDot manual"></i>MANUAL = Chrome extension capture</span></div><div className="opsLog">
+    {opsData.activity.map((row:any,i:number)=>{
+      const details=activityDetails(row);const label=opsLabel(row.source,row.kind);const failed=Number(row.failed||0)>0;
+      return <div className={`opsLogRow ${failed?'failed':''}`} key={`${row.started_at}-${i}`}>
+       <div className="opsTime">{shortDate(row.started_at)}</div>
+       <div className={`opsSource ${label.replaceAll(' ','-').toLowerCase()}`}>{label}</div>
+       <div className="opsMessage">
+        {row.kind==='scheduler'?<><b>{details[0]?.due?'Listing due':'Nothing due'}</b>{details[0]?.candidate_listing_id&&<span> · next candidate #{details[0].candidate_listing_id}</span>}</>:
+         <><b>{row.succeeded||0}/{row.attempted||0} succeeded</b>{row.failed?` · ${row.failed} failed`:''}
+          {details.length>0&&<div className="opsDetails">{details.slice(0,12).map((d:any,j:number)=>{
+            const l=(opsData.listings||[]).find((x:any)=>String(x.listing_id)===String(d.listing_id));
+            return <span key={j} className={d.ok===false?'detailFail':'detailOk'}>{d.ok===false?'Failed':'Success'} {d.listing_id?`#${d.listing_id}`:''}{d.views!=null?` · ${d.views} views`:''}{d.error?` · ${String(d.error).slice(0,110)}`:''}{d.ok===false&&l?.url&&<> · <a href={l.url} target="_blank" rel="noreferrer">open to retry</a></>}</span>
+          })}</div>}
+         </>}
+       </div>
+      </div>
+    })}
+   </div></>}
+  </div></div></div>}
 
   {selected&&<div className="modalBack" onMouseDown={e=>{if(e.target===e.currentTarget)setSelected(null)}}><div className="modal crmModal"><div className="modalTitleBar"><div><span className="windowKicker">PRODUCT CRM</span><h2>{selected.name}</h2></div><button className="windowClose" onClick={()=>setSelected(null)}>×</button></div><div className="modalBody">
    <div className="crmStatusBand"><div><b>{selected.readyForScoring?'Scoring active':'Not scoring yet'}</b><span>{selected.readyForScoring?'Your listing has enough repeated observations for comparison.':selected.ownPrimary?`Your listing has ${selected.ownObservationCount}/3 observations. COBALT waits for at least 3 observations across roughly 24 hours before showing an outcome.`:'Add your own marketplace listing first. That is the most important next step because it lets COBALT measure how your actual listing performs.'}</span></div>{selected.readyForScoring?<span className={`statusTag ${selected.metrics.verdict}`}>{selected.metrics.verdict}</span>:<span className="incompleteTag">Incomplete</span>}</div>
