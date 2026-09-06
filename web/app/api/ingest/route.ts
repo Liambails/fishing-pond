@@ -30,6 +30,37 @@ function cadence(listing:any,rows:any[]){
   if(v>=2||w>=1||own)return {hours:12,reason:own?'own listing tracking':'active listing',evidence:a};
   return {hours:24,reason:'low recent activity',evidence:a};
 }
+
+const REQUIRED_CAPTURE_WARNINGS = new Set(['missing_listing_id','missing_title','missing_price','missing_views','missing_seller','missing_description']);
+function captureQuality(raw:any){
+  const q=raw?.extraction_quality||{};
+  const warnings=Array.isArray(q.warnings)?q.warnings.map(String):[];
+  const pricePresent=[raw?.buy_now_nzd,raw?.asking_price_nzd,raw?.starting_price_nzd,raw?.current_bid_nzd].some(v=>asNum(v)!=null);
+  const derived:string[]=[];
+  if(!raw?.listing_id)derived.push('missing_listing_id');
+  if(!raw?.listing_title)derived.push('missing_title');
+  if(!pricePresent)derived.push('missing_price');
+  if(asNum(raw?.views)==null)derived.push('missing_views');
+  if(!raw?.seller)derived.push('missing_seller');
+  if(!raw?.description)derived.push('missing_description');
+  const relevant=[...new Set([...warnings.filter((w:string)=>REQUIRED_CAPTURE_WARNINGS.has(w)),...derived])];
+  return {complete:relevant.length===0,warnings:relevant,score:q.score??raw?.extraction_score??null};
+}
+function observationProvesComplete(o:any){
+  const raw=o?.raw_snapshot||{};
+  if(raw?.extraction_quality)return captureQuality(raw).complete;
+  const flags=Array.isArray(o?.quality_flags)?o.quality_flags.map(String):[];
+  if(flags.some((w:string)=>REQUIRED_CAPTURE_WARNINGS.has(w)))return false;
+  const pricePresent=[o?.buy_now_nzd,o?.asking_price_nzd,o?.starting_price_nzd,o?.current_bid_nzd].some(v=>asNum(v)!=null);
+  return Number(o?.extraction_score)===100&&pricePresent&&asNum(o?.views)!=null&&Boolean(o?.seller);
+}
+function metadataCaptureComplete(metadata:any){return metadata?.initial_capture_complete===true;}
+function authorized(req:Request){
+  const expected=process.env.COBALT_INGEST_TOKEN||process.env.FISHING_POND_INGEST_TOKEN;
+  const got=req.headers.get('x-cobalt-token')||req.headers.get('x-fishing-pond-token');
+  return Boolean(expected&&got===expected);
+}
+
 function finalise(rows:any[],reason:string){
   const a=activity(rows),r=String(reason||'ended').toLowerCase(); let verdict='WEAK_EVIDENCE';
   if(r.includes('withdraw')||r.includes('remove'))verdict='WITHDRAWN_REMOVED';
@@ -42,7 +73,7 @@ function finalise(rows:any[],reason:string){
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': 'https://www.trademe.co.nz',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, X-Cobalt-Token, X-Fishing-Pond-Token',
   'Access-Control-Max-Age': '86400',
   'Vary': 'Origin',
@@ -59,10 +90,25 @@ export async function OPTIONS() {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
 
+
+export async function GET(req: Request) {
+  if(!authorized(req))return json({ok:false,error:'Unauthorized'},{status:401});
+  const u=new URL(req.url);const marketplace=u.searchParams.get('marketplace')||'Trade Me';const listingId=u.searchParams.get('listing_id');
+  if(!listingId)return json({ok:false,error:'listing_id is required'},{status:400});
+  const db=adminClient();
+  const {data:listing,error}=await db.from('listings').select('id,metadata').eq('marketplace',marketplace).eq('listing_id',listingId).maybeSingle();
+  if(error)return json({ok:false,error:error.message},{status:500});
+  if(!listing)return json({ok:true,exists:false,capture_complete:false});
+  let complete=metadataCaptureComplete(listing.metadata);
+  if(!complete){
+    const {data:observations}=await db.from('observations').select('extraction_score,quality_flags,raw_snapshot,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,views,seller').eq('listing_uuid',listing.id).order('captured_at',{ascending:false}).limit(20);
+    complete=(observations||[]).some(observationProvesComplete);
+  }
+  return json({ok:true,exists:true,capture_complete:complete});
+}
+
 export async function POST(req: Request) {
-  const expected = process.env.COBALT_INGEST_TOKEN || process.env.FISHING_POND_INGEST_TOKEN;
-  const got = req.headers.get('x-cobalt-token') || req.headers.get('x-fishing-pond-token');
-  if (!expected || got !== expected) return json({ ok:false,error:'Unauthorized' }, { status:401 });
+  if(!authorized(req))return json({ok:false,error:'Unauthorized'},{status:401});
   const raw = await req.json();
   if (!raw?.url) return json({ok:false,error:'url is required'}, {status:400});
   let identity;
@@ -72,7 +118,14 @@ export async function POST(req: Request) {
   const db=adminClient();
   const capturedAt=asIso(raw.captured_at) ?? new Date().toISOString();
   const {data:existing}=await db.from('listings').select('*').eq('marketplace',identity.marketplace).eq('listing_id',identity.listingId).maybeSingle();
-  const metadata={...(existing?.metadata||{}),template:raw.template??existing?.metadata?.template??null,category_path:raw.category_path??existing?.metadata?.category_path??null,primary_image_url:raw.primary_image_url??existing?.metadata?.primary_image_url??null};
+  const quality=captureQuality({...raw,listing_id:identity.listingId});
+  let previouslyComplete=metadataCaptureComplete(existing?.metadata);
+  if(existing&&!previouslyComplete){
+    const {data:priorObservations}=await db.from('observations').select('extraction_score,quality_flags,raw_snapshot,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,views,seller').eq('listing_uuid',existing.id).order('captured_at',{ascending:false}).limit(20);
+    previouslyComplete=(priorObservations||[]).some(observationProvesComplete);
+  }
+  const captureComplete=previouslyComplete||quality.complete;
+  const metadata={...(existing?.metadata||{}),template:raw.template??existing?.metadata?.template??null,category_path:raw.category_path??existing?.metadata?.category_path??null,primary_image_url:raw.primary_image_url??existing?.metadata?.primary_image_url??null,initial_capture_complete:captureComplete,initial_capture_completed_at:existing?.metadata?.initial_capture_completed_at||(quality.complete?capturedAt:null),initial_capture_score:existing?.metadata?.initial_capture_score??(quality.complete?quality.score:null)};
   const listingPayload:any={
     marketplace:identity.marketplace,listing_id:identity.listingId,url:identity.canonicalUrl,source_url:raw.source_url||raw.url,
     title:raw.listing_title||existing?.title||null,seller:raw.seller||existing?.seller||null,active:raw.listing_ended?false:true,
@@ -122,5 +175,5 @@ export async function POST(req: Request) {
   let comparableMatch={autoLinked:0,review:0};
   try{comparableMatch=await matchListingIncrementally(db,{...listing,metadata},{...observation,raw_snapshot:raw})}catch(e){console.error('Comparable matcher failed',e)}
 
-  return json({ok:true,marketplace:identity.marketplace,listing_id:identity.listingId,continued:Boolean(existing),observation_saved:true,next_observation_at:next,observation_interval_hours:interval,cadence_reason:cadenceReason,final_verdict:finalVerdict,relist_match:relistMatch,comparable_match:comparableMatch});
+  return json({ok:true,marketplace:identity.marketplace,listing_id:identity.listingId,continued:Boolean(existing),already_saved:previouslyComplete,capture_complete:captureComplete,capture_warnings:captureComplete?[]:quality.warnings,observation_saved:true,next_observation_at:next,observation_interval_hours:interval,cadence_reason:cadenceReason,final_verdict:finalVerdict,relist_match:relistMatch,comparable_match:comparableMatch});
 }
