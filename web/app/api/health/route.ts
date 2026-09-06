@@ -1,1 +1,1 @@
-export async function GET() { return Response.json({ ok: true, service: 'cobalt-v3.9.2.7' }); }
+export async function GET() { return Response.json({ ok: true, service: 'cobalt-v3.9.6' }); }

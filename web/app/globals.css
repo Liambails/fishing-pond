@@ -159,3 +159,23 @@
 .opsDetails a{color:#0b61b5;text-decoration:underline;font-weight:700}
 .detailFail{color:#a13d2f}.detailOk{color:#526473}
 @media(max-width:720px){.opsLogRow{grid-template-columns:95px 90px 1fr}.opsCounts{grid-template-columns:repeat(2,1fr)}}
+
+/* COBALT V3.9.4 scheduler forensics */
+.opsHealth{border:1px solid #c4d0db;background:#f7f9fb;margin-bottom:18px}.opsHealthLead{display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid #d5dee7}.opsHealthLead b{font-size:15px}.opsHealthLead span{color:#5f6f7e;font-size:13px}.opsHealth.healthy .opsHealthLead b{color:#087a52}.opsHealth.degraded .opsHealthLead b{color:#9a6400}.opsHealth.critical .opsHealthLead b,.opsHealth.failed .opsHealthLead b{color:#b42318}.opsHealthGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr))}.opsHealthGrid>div{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border-right:1px solid #d5dee7;border-bottom:1px solid #d5dee7}.opsHealthGrid span{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6a7885}.opsHealthGrid b{font-size:14px}.opsOverdue{display:flex;gap:10px;padding:11px 14px;font-size:12px}.opsOverdue span{color:#5f6f7e;word-break:break-word}
+
+
+/* COBALT V3.9.5.1 — relist lineage tree */
+.listingLineage{display:flex;align-items:flex-start;position:relative;padding-left:calc(var(--lineage-depth,0) * 18px)}
+.listingLineage.hasParent{min-height:34px}
+.lineageBranch{position:absolute;left:calc((var(--lineage-depth,1) - 1) * 18px + 7px);top:-13px;width:13px;height:27px;border-left:1px solid #9aabb9;border-bottom:1px solid #9aabb9;border-bottom-left-radius:5px;pointer-events:none}
+.relistChildRow>td{background:#fbfcfd}
+.relistChildRow:hover>td{background:#f5f8fb}
+.relistTag{display:inline-flex;align-items:center;margin-left:6px;padding:1px 6px;border:1px solid #8ba5ba;border-radius:999px;background:#edf5fb;color:#315d7b;font-size:9px;font-weight:800;letter-spacing:.045em;line-height:16px;vertical-align:middle;white-space:nowrap}
+.relistFrom{margin-top:2px;color:#6a7d8d}
+
+/* COBALT V3.9.6 — structured comparable identity */
+.competitorList{display:flex;flex-direction:column}
+.competitorRow{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #e0e6eb}
+.competitorRow:last-child{border-bottom:0}.competitorMain{min-width:0;flex:1}.competitorActions{display:flex;gap:6px;flex:0 0 auto}
+.matchBreakdown{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}.matchBreakdown span{display:inline-flex;padding:1px 5px;border:1px solid #cdd7df;background:#f7f9fb;color:#5e6e7d;font-size:10px;line-height:15px;border-radius:3px;white-space:nowrap}
+.rejectComparable{color:#8b342b}.rejectComparable:hover{background:#fff4f2;border-color:#c99d97}

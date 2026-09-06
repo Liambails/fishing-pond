@@ -1,6 +1,7 @@
 import { adminClient } from '../../../lib/supabase';
 import { detectMarketplace } from '../../../lib/marketplaces';
 import { matchListingIncrementally } from '../../../lib/comparableMatcher';
+import { detectNewIdRelist } from '../../../lib/relistMatcher';
 
 function asNum(v: unknown) { if (v === null || v === undefined || v === '') return null; const n=Number(v); return Number.isFinite(n)?n:null; }
 function asIso(v: unknown) { if (!v) return null; const d=new Date(String(v)); return Number.isNaN(d.getTime())?null:d.toISOString(); }
@@ -81,7 +82,7 @@ export async function POST(req: Request) {
 
   const q=raw.extraction_quality||{};
   const observation:any={
-    listing_uuid:listing.id,captured_at:capturedAt,collector_version:raw.collector_version||null,listing_mode:raw.listing_mode||null,
+    listing_uuid:listing.id,captured_at:capturedAt,lifecycle_episode:Number(existing?.lifecycle_episode||listing?.lifecycle_episode||1),collector_version:raw.collector_version||null,listing_mode:raw.listing_mode||null,
     buy_now_nzd:asNum(raw.buy_now_nzd),asking_price_nzd:asNum(raw.asking_price_nzd),starting_price_nzd:asNum(raw.starting_price_nzd),current_bid_nzd:asNum(raw.current_bid_nzd),
     views:asNum(raw.views),watchers:asNum(raw.watchers),bids:asNum(raw.bids),close_date:asIso(raw.close_date),close_remaining:raw.close_remaining||null,
     condition:raw.condition||null,location:raw.location||null,seller:raw.seller||null,seller_feedback_pct:asNum(raw.seller_feedback_pct),seller_feedback_count:asNum(raw.seller_feedback_count),
@@ -97,20 +98,28 @@ export async function POST(req: Request) {
   const isEnded=Boolean(raw.listing_ended); let next:string|null=null; let interval:number|null=null; let cadenceReason='listing finalized'; let finalVerdict:string|null=null;
   if(isEnded){
     const reason=String(raw.listing_end_reason||'ended'); const f=finalise(history||[],reason); finalVerdict=f.verdict;
-    await db.from('listings').update({active:false,next_observation_at:null,finalized_at:capturedAt,final_verdict:f.verdict,final_score:f.score,final_evidence:f.evidence,closure_reason:reason,cadence_reason:'listing finalized',consecutive_failures:0,last_error:null,last_success_source:String(raw.capture_source||'extension-manual')}).eq('id',listing.id);
+    const relistNext=new Date(Date.now()+6*3600_000).toISOString(); const watchUntil=new Date(Date.now()+7*86400_000).toISOString();
+    await db.from('listings').update({active:false,lifecycle_state:'relist_watch',next_observation_at:relistNext,relist_check_count:0,relist_watch_until:watchUntil,finalized_at:capturedAt,final_verdict:f.verdict,final_score:f.score,final_evidence:f.evidence,closure_reason:reason,cadence_reason:'closed · relist check in 6h',consecutive_failures:0,last_error:null,last_success_source:String(raw.capture_source||'extension-manual')}).eq('id',listing.id);
+    await db.from('listing_lifecycle_events').insert({listing_uuid:listing.id,listing_family_id:listing.listing_family_id||listing.id,marketplace:listing.marketplace,marketplace_listing_id:listing.listing_id,episode:Number(listing.lifecycle_episode||1),event_type:'closed_relist_watch',occurred_at:capturedAt,reason:{closure_reason:reason,next_check:relistNext}});
   }else{
     const c=cadence(listing,history||[]); interval=c.hours; cadenceReason=c.reason; next=new Date(Date.now()+c.hours*3600_000).toISOString();
     const own=String(listing?.metadata?.ownership||'').toLowerCase()==='own';
     const priority=own?95:(c.hours<=6?88:c.hours<=8?80:c.hours<=12?68:50);
-    await db.from('listings').update({active:true,next_observation_at:next,observation_interval_hours:c.hours,priority,cadence_reason:c.reason,consecutive_failures:0,last_error:null,last_success_source:String(raw.capture_source||'extension-manual'),finalized_at:null,final_verdict:null,final_score:null,final_evidence:{},closure_reason:null}).eq('id',listing.id);
+    const wasRelistWatch=existing?.lifecycle_state==='relist_watch'; const episode=wasRelistWatch?Number(existing?.lifecycle_episode||1)+1:Number(existing?.lifecycle_episode||listing?.lifecycle_episode||1);
+    await db.from('listings').update({active:true,lifecycle_state:'active',lifecycle_episode:episode,next_observation_at:next,observation_interval_hours:c.hours,priority,cadence_reason:wasRelistWatch?'relisted · same marketplace ID':c.reason,consecutive_failures:0,last_error:null,last_success_source:String(raw.capture_source||'extension-manual'),finalized_at:null,final_verdict:null,final_score:null,final_evidence:{},closure_reason:null,relist_check_count:0,relist_watch_until:null,last_relisted_at:wasRelistWatch?capturedAt:(existing?.last_relisted_at||null)}).eq('id',listing.id);
+    if(wasRelistWatch)await db.from('listing_lifecycle_events').insert({listing_uuid:listing.id,listing_family_id:existing?.listing_family_id||listing.id,marketplace:listing.marketplace,marketplace_listing_id:listing.listing_id,episode,event_type:'relisted_same_id',occurred_at:capturedAt,confidence:1,reason:{detected:'previously closed URL is active again'}});
   }
 
   // A successful manual capture is explicit recovery evidence for previous collection failures on this canonical listing.
   await db.from('collection_errors').update({status:'resolved',resolved_at:capturedAt,recovered_at:capturedAt,recovery_source:String(raw.capture_source||'extension-manual'),resolution_note:'Recovered by successful COBALT manual capture.'}).eq('listing_uuid',listing.id).eq('status','open');
 
+  // If this is a newly-seen marketplace ID, check whether it is a relist of a recently closed offer from the same seller.
+  let relistMatch:any=null;
+  if(!existing&&!isEnded){try{relistMatch=await detectNewIdRelist(db,listing,{...observation,raw_snapshot:raw})}catch(e){console.error('[COBALT RELIST] detection failed',e)}}
+
   // Incremental comparable-market matching. This considers only blocked candidate products, not every product in the database.
   let comparableMatch={autoLinked:0,review:0};
   try{comparableMatch=await matchListingIncrementally(db,{...listing,metadata},{...observation,raw_snapshot:raw})}catch(e){console.error('Comparable matcher failed',e)}
 
-  return json({ok:true,marketplace:identity.marketplace,listing_id:identity.listingId,continued:Boolean(existing),observation_saved:true,next_observation_at:next,observation_interval_hours:interval,cadence_reason:cadenceReason,final_verdict:finalVerdict,comparable_match:comparableMatch});
+  return json({ok:true,marketplace:identity.marketplace,listing_id:identity.listingId,continued:Boolean(existing),observation_saved:true,next_observation_at:next,observation_interval_hours:interval,cadence_reason:cadenceReason,final_verdict:finalVerdict,relist_match:relistMatch,comparable_match:comparableMatch});
 }
