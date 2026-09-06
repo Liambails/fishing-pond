@@ -32,32 +32,59 @@ const clamp=(n:number,min=0,max=100)=>Math.max(min,Math.min(max,n));
 const median=(xs:number[])=>{ if(!xs.length)return null; const a=[...xs].sort((x,y)=>x-y); const m=Math.floor(a.length/2); return a.length%2?a[m]:(a[m-1]+a[m])/2; };
 const round=(n:number,d=1)=>Number(n.toFixed(d));
 const DAY=86400000;
+const HOUR=3600000;
+const MIN_INDEPENDENT_GAP_HOURS=3;
+const FULL_VELOCITY_TRUST_HOURS=12;
 export function priceOf(o:Obs){ return o.buy_now_nzd ?? o.asking_price_nzd ?? o.current_bid_nzd ?? null; }
 
 function chronological(obs:Obs[]=[]){
   return [...obs].filter(x=>x.captured_at).sort((a,b)=>Date.parse(a.captured_at!)-Date.parse(b.captured_at!));
 }
-function intervalVelocity(a?:Obs,b?:Obs){
+function independentViewObservations(obs:Obs[]=[]){
+  const a=chronological(obs).filter(x=>x.views!=null);
+  if(a.length<=1)return a;
+  // Work backwards so the freshest capture always wins. Any earlier capture less than
+  // three hours away is still retained in history, but it is not a separate evidence
+  // window for velocity/confidence. This prevents manual refresh bursts from turning
+  // a tiny time slice into an exaggerated daily pace.
+  const selected:Obs[]=[a[a.length-1]];
+  let newestSelected=Date.parse(a[a.length-1].captured_at!);
+  for(let i=a.length-2;i>=0;i--){
+    const t=Date.parse(a[i].captured_at!);
+    if((newestSelected-t)/HOUR>=MIN_INDEPENDENT_GAP_HOURS){
+      selected.push(a[i]);
+      newestSelected=t;
+    }
+  }
+  return selected.reverse();
+}
+
+function intervalVelocityInfo(a?:Obs,b?:Obs){
   if(!a?.captured_at||!b?.captured_at||a.views==null||b.views==null)return null;
-  const days=(Date.parse(b.captured_at)-Date.parse(a.captured_at))/DAY;
-  if(days<=0)return null;
+  const hours=(Date.parse(b.captured_at)-Date.parse(a.captured_at))/HOUR;
+  if(hours<=0)return null;
   const delta=Number(b.views)-Number(a.views);
   // Marketplace view counters are cumulative. A negative delta is a parser/reset anomaly, not negative demand.
   if(delta<0)return null;
-  return round(delta/days,2);
+  const rawVelocity=delta/(hours/24);
+  // 3-12h windows are useful, but should not be treated like a full-day trend.
+  // Trust rises smoothly from 35% at 3h to 100% at 12h.
+  const trust=hours>=FULL_VELOCITY_TRUST_HOURS?1:clamp(.35+.65*((hours-MIN_INDEPENDENT_GAP_HOURS)/(FULL_VELOCITY_TRUST_HOURS-MIN_INDEPENDENT_GAP_HOURS)),.35,1);
+  return {velocity:round(rawVelocity*trust,2),rawVelocity:round(rawVelocity,2),hours:round(hours,2),trust:round(trust,2),delta};
 }
+function intervalVelocity(a?:Obs,b?:Obs){ return intervalVelocityInfo(a,b)?.velocity ?? null; }
 export function listingVelocity(obs:Obs[]=[]){
-  const a=chronological(obs).filter(x=>x.views!=null);
+  const a=independentViewObservations(obs);
   if(a.length<2)return null;
   return intervalVelocity(a[0],a[a.length-1]);
 }
 export function recentVelocity(obs:Obs[]=[]){
-  const a=chronological(obs).filter(x=>x.views!=null);
+  const a=independentViewObservations(obs);
   if(a.length<2)return null;
   return intervalVelocity(a[a.length-2],a[a.length-1]);
 }
 export function previousVelocity(obs:Obs[]=[]){
-  const a=chronological(obs).filter(x=>x.views!=null);
+  const a=independentViewObservations(obs);
   if(a.length<3)return null;
   return intervalVelocity(a[a.length-3],a[a.length-2]);
 }
@@ -74,11 +101,13 @@ function viewsLast24Hours(obs:Obs[]=[]){
 }
 
 function evidenceDetails(listing:Listing,obs:Obs[]){
+  const independent=independentViewObservations(obs);
   const count=obs.length;
-  const spanHours=count>=2?(Date.parse(obs[count-1].captured_at||'')-Date.parse(obs[0].captured_at||''))/3600000:0;
-  const freshnessHours=listing.last_observed_at?Math.max(0,(Date.now()-Date.parse(listing.last_observed_at))/3600000):999;
+  const independentCount=independent.length;
+  const spanHours=independentCount>=2?(Date.parse(independent[independentCount-1].captured_at||'')-Date.parse(independent[0].captured_at||''))/HOUR:0;
+  const freshnessHours=listing.last_observed_at?Math.max(0,(Date.now()-Date.parse(listing.last_observed_at))/HOUR):999;
   const failures=Number(listing.consecutive_failures||0);
-  return {count,spanHours:round(Math.max(0,spanHours),1),freshnessHours:round(freshnessHours,1),failures};
+  return {count,independentCount,compressedCount:Math.max(0,count-independentCount),spanHours:round(Math.max(0,spanHours),1),freshnessHours:round(freshnessHours,1),failures};
 }
 
 function validCloseDate(latest?:Obs){
@@ -112,16 +141,18 @@ function accelerationScore(recent:number|null,previous:number|null){
   return 5;
 }
 function evidenceScore(listing:Listing,obs:Obs[]){
-  const count=obs.length;
-  const spanHours=count>=2?(Date.parse(obs[count-1].captured_at||'')-Date.parse(obs[0].captured_at||''))/3600000:0;
-  const freshnessHours=listing.last_observed_at?Math.max(0,(Date.now()-Date.parse(listing.last_observed_at))/3600000):999;
+  const independent=independentViewObservations(obs);
+  const count=independent.length;
+  const spanHours=count>=2?(Date.parse(independent[count-1].captured_at||'')-Date.parse(independent[0].captured_at||''))/HOUR:0;
+  const freshnessHours=listing.last_observed_at?Math.max(0,(Date.now()-Date.parse(listing.last_observed_at))/HOUR):999;
   const failures=Number(listing.consecutive_failures||0);
-  return clamp(
-    Math.min(60,count*16)+
-    Math.min(20,Math.max(0,spanHours)/24*8)+
-    (freshnessHours<30?20:freshnessHours<54?10:0)-
-    failures*12
-  );
+  // Independent evidence deliberately grows more slowly than the old raw-count formula.
+  // Four captures are useful, but they should not imply near-certainty when two happened
+  // within the same short observation window.
+  const countScore=count<=0?0:count===1?18:count===2?36:count===3?54:count===4?68:count===5?78:84;
+  const spanScore=Math.min(10,Math.max(0,spanHours)/48*10);
+  const freshnessBonus=freshnessHours<30?8:freshnessHours<54?4:0;
+  return clamp(countScore+spanScore+freshnessBonus-failures*12);
 }
 function engagementScore(latest?:Obs){
   if(!latest)return null;
@@ -163,17 +194,20 @@ function baseSignal(listing:Listing){
   const bids=latest?.bids==null?null:Number(latest.bids);
   const currentBid=latest?.current_bid_nzd==null?null:Number(latest.current_bid_nzd);
   const startingPrice=latest?.starting_price_nzd==null?null:Number(latest.starting_price_nzd);
-  const velocity=recentVelocity(obs);
-  const priorVelocity=previousVelocity(obs);
+  const independentObs=independentViewObservations(obs);
+  const recentInfo=independentObs.length>=2?intervalVelocityInfo(independentObs[independentObs.length-2],independentObs[independentObs.length-1]):null;
+  const velocity=recentInfo?.velocity??null;
+  const priorVelocity=independentObs.length>=3?intervalVelocity(independentObs[independentObs.length-3],independentObs[independentObs.length-2]):null;
   const overallVelocity=listingVelocity(obs);
   const price=latest?priceOf(latest):null;
   const observationCount=obs.length;
+  const independentObservationCount=independentObs.length;
   const evidence=evidenceScore(listing,obs);
   const engagement=engagementScore(latest);
   const close=validCloseDate(latest);
   const views24h=viewsLast24Hours(obs);
   const evidenceDetailsValue=evidenceDetails(listing,obs);
-  return {obs,latest,views,watchers,bids,currentBid,startingPrice,velocity,priorVelocity,overallVelocity,price,observationCount,evidence,engagement,close,views24h,evidenceDetails:evidenceDetailsValue};
+  return {obs,latest,views,watchers,bids,currentBid,startingPrice,velocity,priorVelocity,overallVelocity,price,observationCount,independentObservationCount,velocityIntervalHours:recentInfo?.hours??null,velocityTrust:recentInfo?.trust??null,rawRecentVelocity:recentInfo?.rawVelocity??null,evidence,engagement,close,views24h,evidenceDetails:evidenceDetailsValue};
 }
 
 export function computeListingSignals(listings:Listing[]){
@@ -212,31 +246,33 @@ export function computeListingSignals(listings:Listing[]){
     const usable=components.filter(([,w,s])=>w>0&&s!=null) as [string,number,number][];
     const totalWeight=usable.reduce((s,x)=>s+x[1],0)||1;
     const attention=clamp(usable.reduce((s,[,w,score])=>s+w*score,0)/totalWeight);
-    const confidence=clamp(b.evidence + (relativeScore!=null?8:0) + (b.close?5:0));
+    const confidence=clamp(b.evidence + (relativeScore!=null?8:0) + (b.close?5:0),0,99);
 
     const peerPositive=peerGroup.filter(x=>(x.velocity||0)>=2).length;
     const peerPositiveShare=peerGroup.length?peerPositive/peerGroup.length:0;
     const corroborated=peerGroup.length>=2&&peerPositiveShare>=.5;
     const spanReady=b.evidenceDetails.spanHours>=20;
-    const earlyStrong=b.observationCount===2&&attention>=72&&b.velocity!=null;
-    // GOOD requires repeated confirmation. Comparable listings can corroborate the trend;
-    // isolated listings need an extra observation before a strong verdict is allowed.
-    const goodEvidenceReady=b.observationCount>=3&&spanReady&&confidence>=55;
-    const standaloneConfirmed=b.observationCount>=4&&b.velocity!=null&&b.velocity>=6;
+    const earlyStrong=b.independentObservationCount===2&&attention>=72&&b.velocity!=null;
+    // GOOD requires repeated, temporally independent confirmation. Raw captures that land
+    // inside the same <3h window remain visible history but cannot unlock stronger labels.
+    const goodEvidenceReady=b.independentObservationCount>=3&&spanReady&&confidence>=55;
+    const standaloneConfirmed=b.independentObservationCount>=4&&b.velocity!=null&&b.velocity>=6&&(b.velocityIntervalHours??0)>=FULL_VELOCITY_TRUST_HOURS;
+    const corroboratedConfirmed=corroborated&&(b.velocityIntervalHours??0)>=6;
 
     let label='TOO EARLY';
-    if(b.observationCount>=2&&b.velocity!=null&&confidence>=42){
-      if(attention>=88&&confidence>=80&&b.observationCount>=4&&b.evidenceDetails.spanHours>=30&&corroborated)label='MUST_HAVE';
-      else if(attention>=72&&goodEvidenceReady&&(corroborated||standaloneConfirmed))label='GOOD';
+    if(b.independentObservationCount>=2&&b.velocity!=null&&confidence>=42){
+      if(attention>=88&&confidence>=80&&b.independentObservationCount>=4&&b.evidenceDetails.spanHours>=30&&corroboratedConfirmed&&(b.velocityIntervalHours??0)>=FULL_VELOCITY_TRUST_HOURS)label='MUST_HAVE';
+      else if(attention>=72&&goodEvidenceReady&&(corroboratedConfirmed||standaloneConfirmed))label='GOOD';
       else if(attention>=50||earlyStrong)label='WATCHING';
       else label='LOW SIGNAL';
     }
 
     const statusPlain=label==='GOOD'?'Strong attention confirmed by repeated evidence':label==='WATCHING'?(earlyStrong?'Strong early signal, but another observation is needed':'Promising, but not strong enough yet'):label==='LOW SIGNAL'?'Enough data, but attention is weak':label==='TOO EARLY'?'Not enough data yet':'Exceptional attention with repeated peer support';
     const whyParts:string[]=[];
-    if(label==='TOO EARLY') whyParts.push(`only ${b.observationCount} observation${b.observationCount===1?'':'s'} so far`);
+    if(label==='TOO EARLY') whyParts.push(`only ${b.independentObservationCount} independent evidence window${b.independentObservationCount===1?'':'s'} so far`);
     if(b.views24h!=null) whyParts.push(`${b.views24h>=0?'+':''}${b.views24h} views in the last 24h`);
     else if(b.velocity!=null) whyParts.push(`${b.velocity>=0?'+':''}${b.velocity} views/day recently`);
+    if(b.velocityIntervalHours!=null&&b.velocityIntervalHours<FULL_VELOCITY_TRUST_HOURS) whyParts.push(`recent pace is damped because the latest independent window is only ${round(b.velocityIntervalHours,1)}h`);
     if(b.velocity!=null&&b.priorVelocity!=null&&b.priorVelocity>0){
       const ratio=round(b.velocity/b.priorVelocity,1);
       if(ratio>=1.2)whyParts.push(`attention is accelerating (${ratio}× the previous pace)`);
@@ -250,7 +286,8 @@ export function computeListingSignals(listings:Listing[]){
     else if((b.watchers||0)>0) whyParts.push(`${b.watchers} watcher${b.watchers===1?'':'s'} recorded`);
     if(Number(b.listing.consecutive_failures||0)>0) whyParts.push(`${b.listing.consecutive_failures} recent collection failure${b.listing.consecutive_failures===1?'':'s'} lowers reliability`);
     const e=b.evidenceDetails;
-    const confidenceBits=[`${e.count} observation${e.count===1?'':'s'}`];
+    const confidenceBits=[`${e.count} raw observation${e.count===1?'':'s'}`,`${e.independentCount} independent evidence window${e.independentCount===1?'':'s'}`];
+    if(e.compressedCount>0) confidenceBits.push(`${e.compressedCount} close-together capture${e.compressedCount===1?'':'s'} not counted independently`);
     if(e.spanHours>=20) confidenceBits.push(`${Math.round(e.spanHours)}h evidence span`);
     if(e.freshnessHours<=30) confidenceBits.push('recently refreshed');
     if(e.failures===0) confidenceBits.push('no current collection failures');
@@ -263,7 +300,7 @@ export function computeListingSignals(listings:Listing[]){
       velocity:b.velocity,overallVelocity:b.overallVelocity,previousVelocity:b.priorVelocity,
       accelerationScore:aScore,closeScore,hoursToClose:b.close?.hoursToClose??null,closeDate:b.close?.closeDate??null,
       relativeVelocity:relativeRatio==null?null:round(relativeRatio,2),peerMedianVelocity:peerMedian==null?null:round(peerMedian,2),peerCount:peerGroup.length,peerPositive,peerPositiveShare:round(peerPositiveShare,2),corroborated,
-      observationCount:b.observationCount,evidenceScore:round(b.evidence),engagementScore:b.engagement==null?null:round(b.engagement),
+      observationCount:b.observationCount,independentObservationCount:b.independentObservationCount,compressedObservationCount:b.evidenceDetails.compressedCount,velocityIntervalHours:b.velocityIntervalHours,velocityTrust:b.velocityTrust,rawRecentVelocity:b.rawRecentVelocity,evidenceScore:round(b.evidence),engagementScore:b.engagement==null?null:round(b.engagement),
       reason:plainReason,confidenceReason,
       components:Object.fromEntries(usable.map(([name,,score])=>[name,round(score)]))
     };

@@ -55,6 +55,17 @@ function observationProvesComplete(o:any){
   return Number(o?.extraction_score)===100&&pricePresent&&asNum(o?.views)!=null&&Boolean(o?.seller);
 }
 function metadataCaptureComplete(metadata:any){return metadata?.initial_capture_complete===true;}
+
+const MANUAL_CAPTURE_EPISODE_MS=3*60*1000;
+function captureSourceKind(value:any){
+  const s=String(value||'').toLowerCase();
+  if(s.startsWith('extension'))return 'extension-manual';
+  if(s.startsWith('worker'))return 'worker-auto';
+  return s||'unknown';
+}
+function compactCaptureSample(raw:any,capturedAt:string){
+  return {captured_at:capturedAt,views:asNum(raw?.views),watchers:asNum(raw?.watchers),bids:asNum(raw?.bids),capture_source:String(raw?.capture_source||'unknown')};
+}
 function authorized(req:Request){
   const expected=process.env.COBALT_INGEST_TOKEN||process.env.FISHING_POND_INGEST_TOKEN;
   const got=req.headers.get('x-cobalt-token')||req.headers.get('x-fishing-pond-token');
@@ -145,8 +156,38 @@ export async function POST(req: Request) {
     vehicle:raw.vehicle||null,chassis:raw.chassis||raw.chassis_code_label||null,years:raw.years||raw.vehicle_year_label||null,engine_code:raw.engine_code||raw.engine_code_label||null,part_type:raw.part_type||null,
     extraction_score:q.score??raw.extraction_score??null,quality_flags:q.warnings??raw.quality_flags??[],raw_snapshot:raw
   };
-  const {error:obsErr}=await db.from('observations').upsert(observation,{onConflict:'listing_uuid,captured_at'});
-  if(obsErr)return json({ok:false,error:obsErr.message},{status:500});
+  // Coalesce rapid duplicate/manual captures into one collection episode. We keep the
+  // freshest observation value while retaining compact samples inside raw_snapshot for
+  // diagnostics. This stops retries/refreshes seconds apart from advancing cadence or
+  // creating fake market-velocity evidence. Different source families and state changes
+  // are kept as separate rows.
+  let observationCoalesced=false;
+  let observationEpisodeCount=1;
+  const {data:latestObservation}=await db.from('observations').select('*').eq('listing_uuid',listing.id).order('captured_at',{ascending:false}).limit(1).maybeSingle();
+  const latestAt=latestObservation?.captured_at?Date.parse(latestObservation.captured_at):NaN;
+  const currentAt=Date.parse(capturedAt);
+  const sameSourceKind=latestObservation?captureSourceKind(latestObservation.raw_snapshot?.capture_source)===captureSourceKind(raw.capture_source):false;
+  const sameEndedState=latestObservation?Boolean(latestObservation.raw_snapshot?.listing_ended)===Boolean(raw.listing_ended):false;
+  const withinEpisode=Number.isFinite(latestAt)&&Number.isFinite(currentAt)&&currentAt>=latestAt&&(currentAt-latestAt)<=MANUAL_CAPTURE_EPISODE_MS;
+  const canCoalesce=Boolean(latestObservation&&quality.complete&&sameSourceKind&&sameEndedState&&withinEpisode);
+
+  if(canCoalesce){
+    const previousEpisode=latestObservation.raw_snapshot?._capture_episode||{};
+    const previousSamples=Array.isArray(previousEpisode.samples)?previousEpisode.samples:[];
+    const firstCapturedAt=previousEpisode.first_captured_at||latestObservation.captured_at;
+    const baseSamples=previousSamples.length?previousSamples:[compactCaptureSample(latestObservation.raw_snapshot||latestObservation,latestObservation.captured_at)];
+    const samples=[...baseSamples,compactCaptureSample(raw,capturedAt)].slice(-12);
+    observationEpisodeCount=Number(previousEpisode.count||1)+1;
+    observation.raw_snapshot={...raw,_capture_episode:{coalesced:true,count:observationEpisodeCount,first_captured_at:firstCapturedAt,last_captured_at:capturedAt,window_seconds:Math.round((currentAt-Date.parse(firstCapturedAt))/1000),source_kind:captureSourceKind(raw.capture_source),samples}};
+    const updateObservation={...observation}; delete updateObservation.listing_uuid;
+    const {error:obsErr}=await db.from('observations').update(updateObservation).eq('id',latestObservation.id);
+    if(obsErr)return json({ok:false,error:obsErr.message},{status:500});
+    observationCoalesced=true;
+  }else{
+    observation.raw_snapshot={...raw,_capture_episode:{coalesced:false,count:1,first_captured_at:capturedAt,last_captured_at:capturedAt,window_seconds:0,source_kind:captureSourceKind(raw.capture_source),samples:[compactCaptureSample(raw,capturedAt)]}};
+    const {error:obsErr}=await db.from('observations').upsert(observation,{onConflict:'listing_uuid,captured_at'});
+    if(obsErr)return json({ok:false,error:obsErr.message},{status:500});
+  }
   const {data:history}=await db.from('observations').select('captured_at,views,watchers,bids').eq('listing_uuid',listing.id).order('captured_at',{ascending:false}).limit(12);
 
   const isEnded=Boolean(raw.listing_ended); let next:string|null=null; let interval:number|null=null; let cadenceReason='listing finalized'; let finalVerdict:string|null=null;
@@ -175,5 +216,5 @@ export async function POST(req: Request) {
   let comparableMatch={autoLinked:0,review:0};
   try{comparableMatch=await matchListingIncrementally(db,{...listing,metadata},{...observation,raw_snapshot:raw})}catch(e){console.error('Comparable matcher failed',e)}
 
-  return json({ok:true,marketplace:identity.marketplace,listing_id:identity.listingId,continued:Boolean(existing),already_saved:previouslyComplete,capture_complete:captureComplete,capture_warnings:captureComplete?[]:quality.warnings,observation_saved:true,next_observation_at:next,observation_interval_hours:interval,cadence_reason:cadenceReason,final_verdict:finalVerdict,relist_match:relistMatch,comparable_match:comparableMatch});
+  return json({ok:true,marketplace:identity.marketplace,listing_id:identity.listingId,continued:Boolean(existing),already_saved:previouslyComplete,capture_complete:captureComplete,capture_warnings:captureComplete?[]:quality.warnings,observation_saved:true,observation_coalesced:observationCoalesced,observation_episode_count:observationEpisodeCount,next_observation_at:next,observation_interval_hours:interval,cadence_reason:cadenceReason,final_verdict:finalVerdict,relist_match:relistMatch,comparable_match:comparableMatch});
 }

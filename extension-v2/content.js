@@ -2,7 +2,7 @@
   const ROOT_ID='cobalt-root-v3'; let capturing=false;
   const isListing=()=>/\/listing\/\d+/.test(location.pathname);
   const listingIdFromUrl=()=>location.pathname.match(/\/listing\/(\d+)/)?.[1]||null;
-  const settings=()=>new Promise(r=>chrome.storage.sync.get({endpoint:'http://127.0.0.1:8765/capture',token:''},r));
+  const settings=()=>new Promise(r=>chrome.storage.sync.get({endpoint:'https://fishing-pond-seven.vercel.app/api/ingest',token:''},r));
   function remove(){document.getElementById(ROOT_ID)?.remove();}
   function authHeaders(cfg){const headers={'Content-Type':'application/json'};if(cfg.token)headers['X-Cobalt-Token']=cfg.token;return headers;}
   function statusUrl(endpoint,listingId){
@@ -16,6 +16,24 @@
     const status=(m,hold=false)=>{clearTimeout(timer);s.textContent=m;s.classList.add('show');if(!hold)timer=setTimeout(()=>s.classList.remove('show'),3000);};
     const setCaptureReady=()=>{if(savedThisPage)return;b.textContent='COBALT · Capture';b.disabled=false;};
     const setSaved=(label)=>{savedThisPage=true;b.textContent=label;b.disabled=true;};
+
+    const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+    const collectStable=async()=>{
+      const expectedId=listingIdFromUrl();
+      const delays=[0,700,1400,2400];
+      let latest=null;
+      for(let i=0;i<delays.length;i++){
+        if(delays[i]){
+          b.textContent='Waiting for views…';
+          await sleep(delays[i]);
+        }
+        if(listingIdFromUrl()!==expectedId)throw new Error('Listing changed while capturing');
+        latest=await window.CobaltCollect();
+        if(!latest?.listing_id)continue;
+        if(latest.views!=null)return latest;
+      }
+      return latest;
+    };
     const refreshSavedState=async()=>{
       if(capturing||savedThisPage)return;
       const listingId=listingIdFromUrl();if(!listingId)return;
@@ -30,7 +48,7 @@
     const capture=async()=>{
       if(capturing||savedThisPage)return;capturing=true;b.disabled=true;b.textContent='Capturing…';
       try{
-        const data=await window.CobaltCollect(); if(!data?.listing_id)throw new Error('Listing not ready'); data.capture_source='extension-manual';
+        const data=await collectStable(); if(!data?.listing_id)throw new Error('Listing not ready'); data.capture_source='extension-manual';
         const cfg=await settings();
         const resp=await fetch(cfg.endpoint,{method:'POST',headers:authHeaders(cfg),body:JSON.stringify(data)}); const result=await resp.json().catch(()=>({}));
         if(!resp.ok||!result.ok)throw new Error(result.error||`HTTP ${resp.status}`);
@@ -40,7 +58,7 @@
         }else{
           setCaptureReady();
           const warnings=Array.isArray(result.capture_warnings)&&result.capture_warnings.length?` · missing ${result.capture_warnings.map(x=>String(x).replace(/^missing_/,'' )).join(', ')}`:'';
-          status(`Partial capture${warnings}. Wait for the listing to finish loading, then capture again.`,true);
+          status(`Partial capture${warnings}. COBALT retried the rendered page several times; leave the page open a moment and try once more.`,true);
         }
       }catch(e){setCaptureReady();status(`Error: ${e.message}`,true);}finally{capturing=false;}
     };

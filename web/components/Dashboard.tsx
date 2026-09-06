@@ -190,7 +190,7 @@ export default function Dashboard({products,listings,interventions:initialErrors
  async function archiveProduct(){if(!deleteTarget)return;const activeOwn=(deleteTarget.ownListings||[]).filter((x:any)=>x.active!==false);const needsConfirm=activeOwn.length>0;if(needsConfirm&&!deleteConfirmed)return;setBusy(true);const r=await fetch('/api/products',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({productId:deleteTarget.id,action:'archive',marketplaceClosedConfirmed:needsConfirm?deleteConfirmed:false})});const j=await r.json();setBusy(false);if(!r.ok)return alert(j.error||'Unable to remove product');setDeleteTarget(null);setDeleteConfirmed(false);location.reload()}
 
  return <main className="appShell">
-  <header className="appHeader"><div><div className="brandSmall">MOTERA RESEARCH LAB</div><div className="brandTitle cobaltWordmark">COBALT <span>V3.9.8</span></div></div><div className="headerMeta headerClock">{clock?formatNZDateTime(clock,true):'—'}</div></header>
+  <header className="appHeader"><div><div className="brandSmall">MOTERA RESEARCH LAB</div><div className="brandTitle cobaltWordmark">COBALT <span>V3.9.9</span></div></div><div className="headerMeta headerClock">{clock?formatNZDateTime(clock,true):'—'}</div></header>
 
   <section className="overviewSection">
    <div className="overviewTitleRow"><div className="overviewHeading"><h1>Overview</h1></div></div>

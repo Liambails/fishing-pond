@@ -1,6 +1,6 @@
 # COBALT — setup and deployment
 
-Current release: **V3.9.8**. This guide assumes the active local repository is `~/cobalt`.
+Current release: **V3.9.10**. This guide assumes the active local repository is `~/cobalt`.
 
 ## Prerequisites
 

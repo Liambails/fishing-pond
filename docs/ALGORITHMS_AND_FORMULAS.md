@@ -1,20 +1,37 @@
 # COBALT — algorithms and formulas
 
-This document describes the deterministic calculations in the current V3.9.8 codebase. When thresholds/formulas change, update this file in the same commit.
+This document describes the deterministic calculations in the current V3.9.10 codebase. When thresholds/formulas change, update this file in the same commit.
+
+## 0. Capture episodes
+
+A complete capture from the same source family within 3 minutes of the previous observation for the same listing is treated as the same **collection episode**. The database observation row is updated to the freshest values rather than inserting another analytics row. Compact samples are retained in `raw_snapshot._capture_episode` for diagnostics.
+
+This is an ingest-layer guardrail. It prevents browser retries, SPA rerenders, and rapid manual recaptures from advancing cadence or creating multiple evidence points. A source-family change (for example manual extension → scheduled worker) or listing-ended state change always creates a separate observation.
 
 ## 1. View velocity
 
-For observations `a` and `b`:
+COBALT preserves every raw observation, but attention scoring uses **independent evidence windows**. Starting from the freshest view observation and walking backwards, an earlier capture is independent only when it is at least 3 hours away from the next selected capture. A close manual revisit therefore updates the freshest state without acting like another full piece of evidence.
+
+For independent observations `a` and `b`:
 
 ```text
-days = (b.captured_at - a.captured_at) / 24h
+hours = (b.captured_at - a.captured_at) / 1h
 view_delta = b.views - a.views
-velocity = view_delta / days
+raw_velocity = view_delta / (hours / 24)
 ```
 
 A negative view delta is treated as a counter/parser/reset anomaly and returns no velocity; it is **not** negative demand.
 
-`recentVelocity` uses the latest two valid view observations. `previousVelocity` uses the preceding interval. Whole-history velocity remains available but is not the primary attention signal.
+Short independent intervals are deliberately damped before they can influence attention:
+
+```text
+3h interval  -> 35% trust
+3h..12h      -> trust rises linearly from 35% to 100%
+12h+         -> 100% trust
+trusted_velocity = raw_velocity * trust
+```
+
+`recentVelocity` uses the latest two independent view observations. `previousVelocity` uses the preceding independent interval. Whole-history velocity remains available but is not the primary attention signal. Raw observations still appear in view history.
 
 ## 2. Listing attention score
 
@@ -74,18 +91,9 @@ Listings are grouped by inferred make/model/chassis/part key for queue-level pee
 
 ### Evidence component
 
-Evidence quality increases with observation count, evidence span, and recency, and decreases with recent collection failures:
+Evidence quality uses **independent evidence-window count**, not raw capture count. Current count scores are 18, 36, 54, 68, 78 and 84 points for 1, 2, 3, 4, 5 and 6+ independent windows respectively. Evidence span adds up to 10 points over 48 hours, freshness adds 8 points within ~30h or 4 within ~54h, and each current collection failure removes 12 points.
 
-```text
-evidence = clamp(
-  min(60, observation_count * 16)
-  + min(20, span_hours / 24 * 8)
-  + freshness_bonus
-  - consecutive_failures * 12
-)
-```
-
-Freshness bonus is 20 when refreshed within ~30h, 10 within ~54h, otherwise 0.
+Raw captures inside the same <3h window remain visible in history and are reported as close-together captures, but they do not increase confidence. Final listing confidence is capped at 99%.
 
 ### Queue states
 
@@ -95,7 +103,7 @@ Freshness bonus is 20 when refreshed within ~30h, 10 within ~54h, otherwise 0.
 - `GOOD` — attention >=72 with repeated evidence, confidence and corroboration/standalone confirmation.
 - `MUST_HAVE` — internal strict state: attention >=88, confidence >=80, >=4 observations, >=30h span, and peer corroboration.
 
-`GOOD` generally requires >=3 observations, >=20h evidence span and confidence >=55, plus either peer corroboration or a stronger standalone confirmation. An isolated listing can qualify after >=4 observations with sustained recent velocity.
+`GOOD` generally requires >=3 independent evidence windows, >=20h evidence span and confidence >=55. Peer-corroborated promotion also requires the recent independent interval to span at least 6h. An isolated listing requires >=4 independent evidence windows, recent trusted velocity >=6 views/day, and a fully trusted recent interval of at least 12h. `MUST_HAVE` uses the same independent-window discipline.
 
 ## 3. Adaptive observation cadence
 

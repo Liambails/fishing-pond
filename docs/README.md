@@ -16,4 +16,4 @@ The docs describe the **current implementation**, not a diary of every patch. Wh
 
 Historical release notes are consolidated in [`RELEASE_HISTORY.md`](RELEASE_HISTORY.md). Do not add new root-level `Vx_y_RELEASE.md` files unless there is a strong reason to preserve a one-off migration note.
 
-Current application release: **V3.9.8 — Scheduler Activity + First-Capture Close Dates**.
+Current application release: **V3.9.10 — Capture Stabilization + Observation Episodes**.

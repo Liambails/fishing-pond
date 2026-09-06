@@ -1,7 +1,7 @@
 window.CobaltCollect = async function() {
-  // COBALT Trade Me DOM Collector v1.5.2
+  // COBALT Trade Me DOM Collector v1.5.3
   // Current manually-opened page only. No crawling, navigation, or remote fetches.
-  const VERSION = "1.5.2";
+  const VERSION = "1.5.3";
   const $ = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => [...r.querySelectorAll(s)];
   const clean = v => String(v ?? "").trim().replace(/\s+/g, " ");
@@ -125,9 +125,48 @@ window.CobaltCollect = async function() {
   if(!loc&&addr)loc=[addr.addressLocality,addr.addressRegion].filter(Boolean).join(', ');
   put('location',loc,loc?'dom/jsonld':null,.96);
 
-  let views=null; const viewText=txt($('.tm-listing-id-views__views'))||txt($('.tm-motors-date-city-watchlist__views-container'));
-  if(viewText)views=num(viewText); if(views==null){const m=pageText.match(/Page views:\s*([\d,]+)|·\s*([\d,]+)\s+views/i); if(m)views=Number((m[1]||m[2]).replace(/,/g,''));}
-  put('views',views,viewText?'views-dom':views!=null?'page-text':null,.98);
+  // Views: Trade Me renders this field asynchronously and uses more than one template.
+  // Prefer known semantic containers, then conservative label/text fallbacks. Never infer a
+  // view count from an arbitrary number unless the same string explicitly says "view(s)".
+  const parseViewsText = (value) => {
+    const v=clean(value); if(!v)return null;
+    const patterns=[
+      /Page\s+views?\s*:?\s*([\d,]+)/i,
+      /Views?\s*:?\s*([\d,]+)/i,
+      /([\d,]+)\s+(?:page\s+)?views?\b/i,
+      /·\s*([\d,]+)\s+views?\b/i,
+    ];
+    for(const rx of patterns){const m=v.match(rx);if(m)return Number(m[1].replace(/,/g,''));}
+    return null;
+  };
+  const readViews = () => {
+    const knownSelectors=[
+      '.tm-listing-id-views__views',
+      '.tm-motors-date-city-watchlist__views-container',
+      '[class*="listing-id-views"]',
+      '[class*="views-container"]',
+      '[data-testid*="views" i]',
+      '[data-testid*="page-view" i]'
+    ];
+    for(const selector of knownSelectors){
+      for(const el of $$(selector)){
+        const rawText=txt(el);
+        const labelled=parseViewsText(rawText);
+        const n=labelled!=null?labelled:num(rawText);
+        if(n!=null && n>=0)return {value:n,source:`selector:${selector}`};
+      }
+    }
+    // Some templates expose the label through accessibility/title attributes.
+    for(const el of $$('[aria-label],[title]')){
+      const label=clean(el.getAttribute('aria-label')||el.getAttribute('title'));
+      const n=parseViewsText(label); if(n!=null)return {value:n,source:'attribute:view-label'};
+    }
+    const bodyValue=parseViewsText(txt(document.body));
+    return bodyValue!=null?{value:bodyValue,source:'page-text:view-label'}:{value:null,source:null};
+  };
+  const viewRead=readViews();
+  let views=viewRead.value;
+  put('views',views,viewRead.source,views!=null?.98:0);
   let watchers=null; let wm=pageText.match(/([\d,]+)\s+(?:people\s+)?watching\b|Watchers?:\s*([\d,]+)/i); if(wm)watchers=Number((wm[1]||wm[2]).replace(/,/g,''));
   put('watchers',watchers,watchers!=null?'page-text':null,.82);
   let bids=null; if(/\bNo bids\b/i.test(priceArea))bids=0; else {let bm=priceArea.match(/([\d,]+)\s+bids?\b|Bids?:\s*([\d,]+)/i);if(bm)bids=Number((bm[1]||bm[2]).replace(/,/g,''));}

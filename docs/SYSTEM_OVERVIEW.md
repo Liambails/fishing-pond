@@ -12,7 +12,7 @@ COBALT is Motera's product-opportunity research system. It turns marketplace lis
 
 COBALT deliberately separates **collection**, **identity**, **market intelligence**, and **sourcing decisions**. A high view count is evidence of attention, not proof of a sale.
 
-Current release: **V3.9.8 — Scheduler Activity + First-Capture Close Dates**.
+Current release: **V3.9.10 — Capture Stabilization + Observation Episodes**.
 
 ## End-to-end architecture
 

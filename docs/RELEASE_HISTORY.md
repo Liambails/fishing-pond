@@ -1,6 +1,27 @@
 # COBALT — release history
 
+## V3.9.10 — Capture Stabilization + Observation Episodes
+
+- Chrome capture now retries Trade Me view extraction across several render windows before submitting a partial capture.
+- Trade Me view extraction now supports additional semantic containers, labelled accessibility/title values, and conservative explicit `views` text patterns without treating arbitrary page numbers as views.
+- Rapid same-source captures inside a 3-minute window are coalesced into one database observation episode when the capture is complete; the freshest values win and compact raw samples remain in `_capture_episode` diagnostics.
+- Coalesced captures no longer advance the learning cadence or inflate raw observation depth.
+- Source-family and listing-ended state changes are never coalesced together.
+- Added a seconds-apart `16 → 16 → 19` regression proving that this burst remains `TOO EARLY` with no velocity instead of extrapolating ~18,000 views/day.
+- Extension cloud endpoint now defaults to the production `/api/ingest` URL rather than localhost.
+- No database migration is required.
+
 This is a compact engineering history. Current behavior belongs in the maintained system/algorithm/operations docs rather than in release-note sprawl.
+
+## V3.9.9 — Temporal Evidence Guardrails
+
+- Raw observation history is preserved, but captures less than 3 hours apart no longer count as separate evidence windows for attention scoring.
+- Independent evidence is selected backwards from the freshest capture, so a close manual revisit can update the current view count without inflating evidence depth.
+- Recent view velocity from 3–12 hour windows is damped from 35% to 100% trust; 12+ hour windows receive full trust.
+- Evidence confidence now grows from independent evidence windows rather than raw capture count, has a 99% ceiling, and exposes compressed-capture diagnostics.
+- Standalone `GOOD` requires at least 4 independent evidence windows and a fully trusted (12h+) recent interval; peer-corroborated `GOOD` still requires at least a 6h recent interval.
+- Added regression tests for short manual capture bursts, sustained well-spaced trends, and velocity damping.
+- No database migration is required.
 
 ## V3.9.8 — Scheduler Activity + First-Capture Close Dates
 

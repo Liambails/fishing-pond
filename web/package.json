@@ -1,11 +1,12 @@
 {
   "name": "cobalt-web",
-  "version": "3.9.8",
+  "version": "3.9.10",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test:intelligence": "node scripts/test-intelligence.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

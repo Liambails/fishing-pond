@@ -16,7 +16,7 @@ KEY=os.environ.get('SUPABASE_SERVICE_ROLE_KEY','')
 RUN_ID=os.environ.get('GITHUB_RUN_ID') or 'local'
 RUN_ATTEMPT=int(os.environ.get('GITHUB_RUN_ATTEMPT') or 1)
 LOG_PATH=Path(os.environ.get('COBALT_SCHEDULER_LOG','scheduler_debug.jsonl'))
-VERSION=os.environ.get('COBALT_VERSION','3.9.8')
+VERSION=os.environ.get('COBALT_VERSION','3.9.10')
 
 
 def now(): return datetime.now(timezone.utc).isoformat()

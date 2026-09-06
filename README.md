@@ -1,6 +1,6 @@
 # COBALT — Motera Product Opportunity Tracker
 
-Current release: **V3.9.8 — Scheduler Activity + First-Capture Close Dates**.
+Current release: **V3.9.10 — Capture Stabilization + Observation Episodes**.
 
 COBALT is Motera's marketplace product-research system. It collects longitudinal listing observations, scores listing attention, groups genuinely comparable automotive parts, builds similarity-weighted market benchmarks, tracks suppliers/products, preserves relist lineage, and exposes scheduler/matcher diagnostics through a Next.js dashboard.
 
