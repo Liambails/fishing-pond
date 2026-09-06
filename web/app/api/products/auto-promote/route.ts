@@ -27,7 +27,11 @@ export async function POST(req:Request){
   const {data:rows,error}=await db.from('listings').select('*').in('id',listingIds).is('product_id',null).eq('active',true);
   if(error)throw error;
   const groups=new Map<string,{shape:any,rows:any[]}>();
-  for(const row of rows||[]){const shape=infer(row.title||'');const k=key(shape);const g=groups.get(k)||{shape,rows:[]};g.rows.push(row);groups.set(k,g)}
+  for(const row of rows||[]){
+   const queueStatus=String(row?.metadata?.observation_queue_status||'active').toLowerCase();
+   if(queueStatus==='dismissed')continue;
+   const shape=infer(row.title||'');const k=key(shape);const g=groups.get(k)||{shape,rows:[]};g.rows.push(row);groups.set(k,g)
+  }
   let createdProducts=0,linkedListings=0;
   for(const {shape,rows:groupRows} of groups.values()){
    if(!groupRows.length)continue;
@@ -37,7 +41,11 @@ export async function POST(req:Request){
    const links=groupRows.map((l:any)=>({product_id:p.id,listing_uuid:l.id,role:'competitor'}));
    const {error:le}=await db.from('product_listings').insert(links);if(le)throw le;
    const ids=groupRows.map((l:any)=>l.id);
-   const {error:ue}=await db.from('listings').update({product_id:p.id}).in('id',ids);if(ue)throw ue;
+   const promotedAt=new Date().toISOString();
+   for(const l of groupRows){
+    const metadata=l?.metadata&&typeof l.metadata==='object'&&!Array.isArray(l.metadata)?l.metadata:{};
+    const {error:ue}=await db.from('listings').update({product_id:p.id,metadata:{...metadata,observation_queue_status:'promoted',observation_queue_decided_at:promotedAt}}).eq('id',l.id);if(ue)throw ue;
+   }
    linkedListings+=ids.length;
    await reconcileProduct(db,p);
   }

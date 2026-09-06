@@ -1,6 +1,8 @@
 # COBALT — Motera Product Opportunity Tracker
 
-Current release: **V3.9.10 — Capture Stabilization + Observation Episodes**.
+Current release: **V3.9.11 — Observation Decision Inbox + UI Layering**.
+
+V3.9.11 turns the Observation Queue into an active decision inbox: unresolved opportunities are shown by default and ranked most-promising-first, while promoted and dismissed research remains available through status filters. Help popovers are rendered in a top-level portal so they are not clipped by table viewports, and My Products now uses the same sticky-header scrolling behavior as the Observation Queue. Queue lifecycle state is stored in existing listing metadata, so no database migration is required.
 
 COBALT is Motera's marketplace product-research system. It collects longitudinal listing observations, scores listing attention, groups genuinely comparable automotive parts, builds similarity-weighted market benchmarks, tracks suppliers/products, preserves relist lineage, and exposes scheduler/matcher diagnostics through a Next.js dashboard.
 

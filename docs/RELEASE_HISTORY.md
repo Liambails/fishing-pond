@@ -1,5 +1,17 @@
 # COBALT — release history
 
+## V3.9.11 — Observation Decision Inbox + UI Layering
+
+- Observation Queue now defaults to **Active** unresolved research rather than every listing ever observed.
+- Added queue states: **Active**, **Promoted**, **Dismissed**, and **All**. Promoted candidates are preserved but removed from the active decision inbox.
+- Added **Dismiss selected** and **Restore selected** actions without deleting observation history.
+- Creating or auto-promoting a product records the source listing as promoted and retains the product link/provenance.
+- Default queue order is **Most promising**, using signal strength, confidence, trusted velocity, independent evidence depth, and recent view growth. Optional Velocity, Confidence, and Newest orders remain available.
+- Added queue counters for Active, Promising, Promoted, and Dismissed research.
+- Information popovers now render through a document-level portal, preventing clipping beneath scroll containers or sticky table headers.
+- My Products and Observation Queue now share the same sticky table-header viewport behavior.
+- Queue lifecycle metadata uses the existing `listings.metadata` JSONB field; **no database migration is required**.
+
 ## V3.9.10 — Capture Stabilization + Observation Episodes
 
 - Chrome capture now retries Trade Me view extraction across several render windows before submitting a partial capture.

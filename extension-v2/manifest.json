@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "COBALT Capture",
-  "version": "3.9.10",
+  "version": "3.9.11",
   "description": "One-click manual capture/recovery for supported marketplace listings, stored in COBALT.",
   "permissions": [
     "activeTab",

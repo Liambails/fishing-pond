@@ -37,7 +37,12 @@ export async function POST(req:Request){
   }).select().single();
   if(error)throw error;
   await db.from('product_listings').insert((chosen||[]).map((l:any)=>({product_id:p.id,listing_uuid:l.id,role:'competitor'})));
-  await db.from('listings').update({product_id:p.id}).in('id',listingIds);
+  const promotedAt=new Date().toISOString();
+  for(const l of chosen||[]){
+   const metadata=l?.metadata&&typeof l.metadata==='object'&&!Array.isArray(l.metadata)?l.metadata:{};
+   const {error:listingUpdateError}=await db.from('listings').update({product_id:p.id,metadata:{...metadata,observation_queue_status:'promoted',observation_queue_decided_at:promotedAt}}).eq('id',l.id);
+   if(listingUpdateError)throw listingUpdateError;
+  }
   const matching=await reconcileProduct(db,p);
   return NextResponse.json({ok:true,product:p,matching});
  }catch(e:any){return NextResponse.json({error:e.message||'Unable to create product'},{status:500})}

@@ -52,7 +52,44 @@ function HoverHistory({label,children,rows,empty='No history collected yet.'}:{l
    </span>,document.body):null;
  return <><span ref={anchorRef} className="historyAnchor" tabIndex={0} onMouseEnter={show} onFocus={show} onMouseLeave={hideSoon} onBlur={hideSoon}>{children}<span className="historyEye" aria-hidden="true"></span></span>{popover}</>
 }
-function InfoTip({children}:{children:any}){return <span className="infoTip" tabIndex={0}>i<span className="infoBubble">{children}</span></span>}
+function InfoTip({children}:{children:any}){
+ const [open,setOpen]=useState(false);
+ const [pos,setPos]=useState<{top:number;left:number}|null>(null);
+ const anchorRef=useRef<HTMLSpanElement|null>(null);
+ const closeTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+ const cancelClose=()=>{if(closeTimer.current){clearTimeout(closeTimer.current);closeTimer.current=null}};
+ const hideSoon=()=>{cancelClose();closeTimer.current=setTimeout(()=>setOpen(false),140)};
+ const show=()=>{cancelClose();setOpen(true)};
+ useEffect(()=>{
+  if(!open)return;
+  const place=()=>{
+   const el=anchorRef.current;if(!el)return;
+   const r=el.getBoundingClientRect();
+   const width=Math.min(330,Math.max(240,window.innerWidth-24));
+   const estimatedHeight=150;
+   const left=Math.max(12,Math.min(r.left-120,window.innerWidth-width-12));
+   const roomBelow=window.innerHeight-r.bottom;
+   const top=roomBelow>=estimatedHeight?Math.min(window.innerHeight-estimatedHeight-12,r.bottom+8):Math.max(12,r.top-estimatedHeight-8);
+   setPos({top,left});
+  };
+  place();window.addEventListener('resize',place);window.addEventListener('scroll',place,true);
+  return()=>{window.removeEventListener('resize',place);window.removeEventListener('scroll',place,true)};
+ },[open]);
+ useEffect(()=>()=>cancelClose(),[]);
+ const bubble=open&&pos&&typeof document!=='undefined'?createPortal(<span className="infoBubble infoBubblePortal" style={{top:pos.top,left:pos.left}} onMouseEnter={cancelClose} onMouseLeave={hideSoon}>{children}</span>,document.body):null;
+ return <><span ref={anchorRef} className="infoTip" tabIndex={0} aria-label="More information" onMouseEnter={show} onFocus={show} onMouseLeave={hideSoon} onBlur={hideSoon}>i</span>{bubble}</>
+}
+
+const queueState=(l:any)=>String(l?.metadata?.observation_queue_status|| (l?.product_id?'promoted':'active')).toLowerCase();
+const signalWeight=(label:any)=>{const weights:Record<string,number>={MUST_HAVE:5,'MUST HAVE':5,GOOD:4,WATCHING:3,'LOW SIGNAL':2,'TOO EARLY':1};return weights[String(label||'TOO EARLY').replaceAll('_',' ')]||0;};
+const queuePriority=(l:any)=>{
+ const signal=Number(signalWeight(l?.signal?.label));
+ const confidence=Math.max(0,Math.min(100,Number(l?.signal?.confidence)||0));
+ const velocity=Math.max(-20,Math.min(100,Number(l?.signal?.velocity)||0));
+ const independent=Math.max(0,Math.min(10,Number(l?.signal?.independentObservationCount)||0));
+ const views24=Math.max(0,Math.min(100,Number(l?.signal?.views24h)||0));
+ return signal*10000+confidence*50+velocity*20+independent*25+views24*5;
+};
 
 export default function Dashboard({products,listings,interventions:initialErrors,systemEvents:initialSystemEvents,aiEnabled}:Props){
  const [selected,setSelected]=useState<any>(null);
@@ -61,8 +98,10 @@ export default function Dashboard({products,listings,interventions:initialErrors
  const [checks,setChecks]=useState<string[]>([]);
  const [busy,setBusy]=useState(false);
  const [productFilter,setProductFilter]=useState('ALL');
+ const [queueStatus,setQueueStatus]=useState('ACTIVE');
  const [queueFreshness,setQueueFreshness]=useState('ALL');
  const [queueSignal,setQueueSignal]=useState('ALL');
+ const [queueOrder,setQueueOrder]=useState('PROMISING');
  const [queueSearch,setQueueSearch]=useState('');
  const [issueFilter,setIssueFilter]=useState('OPEN');
  const [issueKind,setIssueKind]=useState('ALL');
@@ -97,6 +136,7 @@ export default function Dashboard({products,listings,interventions:initialErrors
  const observationRef=useRef<HTMLElement|null>(null);
  function scrollTo(el:HTMLElement|null){if(!el)return;requestAnimationFrame(()=>el.scrollIntoView({behavior:'smooth',block:'start'}));}
  function openObservation(mode:'ALL'|'NEW'|'PROSPECT'){
+   setQueueStatus('ACTIVE');
    if(mode==='NEW'){setQueueFreshness('FRESH');setQueueSignal('ALL')}
    else if(mode==='PROSPECT'){setQueueFreshness('ALL');setQueueSignal('PROSPECT')}
    else {setQueueFreshness('ALL');setQueueSignal('ALL')}
@@ -133,33 +173,44 @@ export default function Dashboard({products,listings,interventions:initialErrors
  const openCollectionIssues=(()=>{const seen=new Set<string>();return errors.filter(x=>(x.status||'open')==='open').sort((a,b)=>Date.parse(b.occurred_at||'')-Date.parse(a.occurred_at||'')).filter(x=>{const key=String(x.listing_uuid||x.listing_id||x.id);if(seen.has(key))return false;seen.add(key);return true;})})();
  const attention=openCollectionIssues.length+systemEvents.filter(x=>(x.status||'open')==='open'&&['error','critical','warning'].includes(x.severity)).length;
  const nowMs=clock?.getTime()??null;
- const new24=nowMs==null?0:listings.filter(x=>x.first_seen&&nowMs-Date.parse(x.first_seen)<86400000).length;
+ const activeListings=listings.filter(x=>queueState(x)==='active');
+ const promotedListings=listings.filter(x=>queueState(x)==='promoted');
+ const dismissedListings=listings.filter(x=>queueState(x)==='dismissed');
+ const new24=nowMs==null?0:activeListings.filter(x=>x.first_seen&&nowMs-Date.parse(x.first_seen)<86400000).length;
  const scoredProducts=products.filter(p=>p.readyForScoring&&p.metrics?.verdict);
  const strongProducts=scoredProducts.filter(p=>['STRONG','SCALE'].includes(p.metrics?.verdict)).length;
  const watchProducts=scoredProducts.filter(p=>['PROMISING','WATCH'].includes(p.metrics?.verdict)).length;
- const goodListings=listings.filter(x=>x.signal?.label==='GOOD').length;
- const watchingListings=listings.filter(x=>x.signal?.label==='WATCHING').length;
- const prospects=goodListings+watchingListings;
- const fallbackBrief=`${products.length} product${products.length===1?' is':'s are'} in My Products. ${scoredProducts.length?`${strongProducts} currently look strong and ${watchProducts} need watching.`:'None are being scored yet because your own listings still need enough tracking data.'} The observation queue has ${goodListings} good and ${watchingListings} watching listing${goodListings+watchingListings===1?'':'s'}.`;
+ const mustHaveListings=activeListings.filter(x=>x.signal?.label==='MUST_HAVE').length;
+ const goodListings=activeListings.filter(x=>x.signal?.label==='GOOD').length;
+ const watchingListings=activeListings.filter(x=>x.signal?.label==='WATCHING').length;
+ const prospects=mustHaveListings+goodListings+watchingListings;
+ const fallbackBrief=`${products.length} product${products.length===1?' is':'s are'} in My Products. ${scoredProducts.length?`${strongProducts} currently look strong and ${watchProducts} need watching.`:'None are being scored yet because your own listings still need enough tracking data.'} The active observation queue has ${mustHaveListings+goodListings} strong candidate${mustHaveListings+goodListings===1?'':'s'} and ${watchingListings} watching listing${watchingListings===1?'':'s'}.`;
 
  async function loadDailyBrief(force=false){if(!aiEnabled){setDailyBrief({summary:fallbackBrief,cached:true,ai:false});return}try{const r=await fetch('/api/ai/daily-summary',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({force})});const j=await r.json();setDailyBrief(r.ok?j:{summary:fallbackBrief,ai:false,error:j.error})}catch{setDailyBrief({summary:fallbackBrief,ai:false})}}
  useEffect(()=>{loadDailyBrief(false)},[]);
  useEffect(()=>{setClock(new Date());const t=setInterval(()=>setClock(new Date()),1000);return()=>clearInterval(t)},[]);
  useEffect(()=>{
-   const mustHave=listings.filter(x=>!x.product_id&&x.signal?.label==='MUST_HAVE').map(x=>x.id);
+   const mustHave=listings.filter(x=>!x.product_id&&queueState(x)==='active'&&x.signal?.label==='MUST_HAVE').map(x=>x.id);
    if(!mustHave.length)return;
    fetch('/api/products/auto-promote',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({listingIds:mustHave})}).then(r=>r.ok?r.json():null).then(j=>{if(j?.createdProducts>0)location.reload()}).catch(()=>{});
  },[]);
 
  const filteredProducts=products.filter(p=>productFilter==='ALL'||(productFilter==='INCOMPLETE'?!p.readyForScoring:p.metrics?.verdict===productFilter));
  const filteredListings=listings.filter(l=>{
+   const state=queueState(l);
    const fresh24=nowMs!=null&&l.first_seen&&nowMs-Date.parse(l.first_seen)<86400000;
+   if(queueStatus!=='ALL'&&state!==queueStatus.toLowerCase())return false;
    if(queueFreshness==='FRESH'&&!fresh24)return false;
    if(queueFreshness==='STALE'&&fresh24)return false;
-   if(queueSignal==='PROSPECT'&&!['GOOD','WATCHING'].includes(l.signal?.label))return false;
+   if(queueSignal==='PROSPECT'&&!['MUST_HAVE','GOOD','WATCHING'].includes(l.signal?.label))return false;
    if(!['ALL','PROSPECT'].includes(queueSignal)&&l.signal?.label!==queueSignal)return false;
    if(queueSearch){const q=queueSearch.toLowerCase();if(!`${l.listing_id} ${l.title||''} ${l.seller||''}`.toLowerCase().includes(q))return false;}
    return true;
+ }).sort((a:any,b:any)=>{
+   if(queueOrder==='NEWEST')return Date.parse(b.first_seen||'')-Date.parse(a.first_seen||'');
+   if(queueOrder==='VELOCITY')return Number(b.signal?.velocity??-Infinity)-Number(a.signal?.velocity??-Infinity);
+   if(queueOrder==='CONFIDENCE')return Number(b.signal?.confidence||0)-Number(a.signal?.confidence||0);
+   return queuePriority(b)-queuePriority(a)||Date.parse(b.last_observed_at||b.last_seen||'')-Date.parse(a.last_observed_at||a.last_seen||'');
  });
  const lineageListings=(()=>{
    const visible=new Map(filteredListings.map((l:any)=>[String(l.id),l]));
@@ -169,7 +220,7 @@ export default function Dashboard({products,listings,interventions:initialErrors
        const key=String(l.relisted_from);children.set(key,[...(children.get(key)||[]),l]);
      }
    }
-   for(const rows of children.values())rows.sort((a:any,b:any)=>Date.parse(a.first_seen||'')-Date.parse(b.first_seen||''));
+   for(const rows of children.values())rows.sort((a:any,b:any)=>queueOrder==='PROMISING'?queuePriority(b)-queuePriority(a):Date.parse(a.first_seen||'')-Date.parse(b.first_seen||''));
    const out:{listing:any;depth:number}[]=[];const visited=new Set<string>();
    const walk=(l:any,depth:number)=>{const id=String(l.id);if(visited.has(id))return;visited.add(id);out.push({listing:l,depth});for(const c of children.get(id)||[])walk(c,depth+1)};
    const roots=filteredListings.filter((l:any)=>!l.relisted_from||!visible.has(String(l.relisted_from)));
@@ -180,7 +231,15 @@ export default function Dashboard({products,listings,interventions:initialErrors
  const dedupedCollectionIssues=(()=>{const seen=new Set<string>();return [...errors].sort((a,b)=>Date.parse(b.occurred_at||'')-Date.parse(a.occurred_at||'')).filter(x=>{const key=String(x.listing_uuid||x.listing_id||x.id);if(seen.has(key))return false;seen.add(key);return true;});})();
  const combinedIssues=[...dedupedCollectionIssues.map(x=>({...x,_kind:'COLLECTION'})),...systemEvents.map(x=>({...x,_kind:'SYSTEM',error_type:x.event_type,error_message:x.message,occurred_at:x.occurred_at}))].filter(x=>issueFilter==='ALL'||(x.status||'open').toUpperCase()===issueFilter).filter(x=>issueKind==='ALL'||x._kind===issueKind).sort((a,b)=>Date.parse(b.occurred_at||'')-Date.parse(a.occurred_at||''));
 
- async function createProduct(){if(!checks.length)return;setBusy(true);const r=await fetch('/api/products',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({listingIds:checks})});setBusy(false);if(r.ok)location.reload();else alert(await r.text())}
+ async function createProduct(){if(!checks.length)return;const eligible=checks.filter(id=>queueState(listings.find((x:any)=>x.id===id))!=='promoted');if(!eligible.length)return;setBusy(true);const r=await fetch('/api/products',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({listingIds:eligible})});setBusy(false);if(r.ok)location.reload();else alert(await r.text())}
+ async function updateQueueState(action:'dismiss'|'restore'){
+  if(!checks.length)return;
+  setBusy(true);
+  const r=await fetch('/api/observation-queue',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({listingIds:checks,action})});
+  const j=await r.json().catch(()=>({}));setBusy(false);
+  if(!r.ok)return alert(j.error||'Unable to update observation queue');
+  location.reload();
+ }
  async function resolveIssue(x:any,status:'resolved'|'dismissed'){await fetch('/api/interventions',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({id:x.id,status,kind:x._kind})});if(x._kind==='SYSTEM')setSystemEvents(v=>v.map(e=>e.id===x.id?{...e,status}:e));else setErrors(v=>v.map(e=>e.id===x.id?{...e,status}:e))}
  async function decideComparable(productId:string,listingId:string,action:'accept'|'reject'){setBusy(true);const r=await fetch('/api/products/reconcile',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({productId,listingId,action})});setBusy(false);if(r.ok)location.reload();else alert(await r.text())}
  async function analyze(){if(!selected||!selected.readyForScoring)return;setBusy(true);const r=await fetch('/api/ai/analyze',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({productId:selected.id})});const j=await r.json();setBusy(false);if(!r.ok)return alert(j.error||'AI analysis failed');setSelected({...selected,ai_summary:j.summary,ai_analysis:j.analysis})}
@@ -190,12 +249,12 @@ export default function Dashboard({products,listings,interventions:initialErrors
  async function archiveProduct(){if(!deleteTarget)return;const activeOwn=(deleteTarget.ownListings||[]).filter((x:any)=>x.active!==false);const needsConfirm=activeOwn.length>0;if(needsConfirm&&!deleteConfirmed)return;setBusy(true);const r=await fetch('/api/products',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({productId:deleteTarget.id,action:'archive',marketplaceClosedConfirmed:needsConfirm?deleteConfirmed:false})});const j=await r.json();setBusy(false);if(!r.ok)return alert(j.error||'Unable to remove product');setDeleteTarget(null);setDeleteConfirmed(false);location.reload()}
 
  return <main className="appShell">
-  <header className="appHeader"><div><div className="brandSmall">MOTERA RESEARCH LAB</div><div className="brandTitle cobaltWordmark">COBALT <span>V3.9.9</span></div></div><div className="headerMeta headerClock">{clock?formatNZDateTime(clock,true):'—'}</div></header>
+  <header className="appHeader"><div><div className="brandSmall">MOTERA RESEARCH LAB</div><div className="brandTitle cobaltWordmark">COBALT <span>V3.9.11</span></div></div><div className="headerMeta headerClock">{clock?formatNZDateTime(clock,true):'—'}</div></header>
 
   <section className="overviewSection">
    <div className="overviewTitleRow"><div className="overviewHeading"><h1>Overview</h1></div></div>
    <p className="overviewText">{dailyBrief?.summary||fallbackBrief}</p>
-   <div className="summaryStrip"><button className="metricLink" onClick={()=>scrollTo(productsRef.current)}><b>{products.length}</b> Products</button><button className="metricLink" onClick={()=>openObservation('ALL')}><b>{listings.length}</b> listings being observed</button><button className="metricLink" onClick={()=>openObservation('NEW')}><b>{new24}</b> New listings in 24h</button><button className={`metricLink ${attention>0?'hasIssues':''}`} onClick={()=>requestAnimationFrame(()=>document.getElementById('issues-to-resolve')?.scrollIntoView({behavior:'smooth',block:'start'}))}><b>{attention}</b> Issues to resolve</button><button className="metricLink" onClick={()=>openObservation('PROSPECT')}><b>{prospects}</b> Prospect listings</button><button className="metricLink automationMetric" onClick={openAutomationLog}><b>↻</b> Automation logs</button></div>
+   <div className="summaryStrip"><button className="metricLink" onClick={()=>scrollTo(productsRef.current)}><b>{products.length}</b> Products</button><button className="metricLink" onClick={()=>openObservation('ALL')}><b>{activeListings.length}</b> active observations</button><button className="metricLink" onClick={()=>openObservation('NEW')}><b>{new24}</b> New listings in 24h</button><button className={`metricLink ${attention>0?'hasIssues':''}`} onClick={()=>requestAnimationFrame(()=>document.getElementById('issues-to-resolve')?.scrollIntoView({behavior:'smooth',block:'start'}))}><b>{attention}</b> Issues to resolve</button><button className="metricLink" onClick={()=>openObservation('PROSPECT')}><b>{prospects}</b> Prospect listings</button><button className="metricLink automationMetric" onClick={openAutomationLog}><b>↻</b> Automation logs</button></div>
    {!aiEnabled&&<div className="inlineNote">AI summaries are off locally. Add <code>OPENAI_API_KEY</code> to <code>web/.env.local</code> and restart the dev server.</div>}
   </section>
 
@@ -216,17 +275,17 @@ export default function Dashboard({products,listings,interventions:initialErrors
   </section>
 
   <section ref={observationRef} className="panelSection observationSection sectionAnchor">
-   <div className="sectionBar"><div><h2>Observation queue ({listings.length})</h2><div className="sectionHint">Use repeated marketplace observations to decide which competitor products deserve promotion into My Products.</div></div><div className="actionRow"><button className="classicButton" disabled={!checks.length||!aiEnabled||busy} onClick={reviewSelected}>AI review selected{checks.length?` (${checks.length})`:''}</button><button className="classicButton primaryButton" disabled={!checks.length||busy} onClick={createProduct}>Create product from selected{checks.length?` (${checks.length})`:''}</button></div></div>
-   <div className="filterBar"><label>New <select value={queueFreshness} onChange={e=>setQueueFreshness(e.target.value)}><option value="ALL">All</option><option value="FRESH">New &lt;24h</option><option value="STALE">Older ≥24h</option></select></label><label>Signal <select value={queueSignal} onChange={e=>setQueueSignal(e.target.value)}><option value="ALL">All</option><option>GOOD</option><option>WATCHING</option><option>LOW SIGNAL</option><option>TOO EARLY</option></select></label><label className="searchLabel">Search <input value={queueSearch} onChange={e=>setQueueSearch(e.target.value)} placeholder="listing, title or seller"/></label></div>
+   <div className="sectionBar queueSectionBar"><div><h2>Observation Queue · {activeListings.length} active</h2><div className="sectionHint">A decision inbox: strongest unresolved opportunities rise to the top; promoted and dismissed research stays available without cluttering active work.</div><div className="queueStats"><span><b>{activeListings.length}</b> Active</span><span><b>{prospects}</b> Promising</span><span><b>{promotedListings.length}</b> Promoted</span><span><b>{dismissedListings.length}</b> Dismissed</span></div></div><div className="actionRow"><button className="classicButton" disabled={!checks.length||!aiEnabled||busy} onClick={reviewSelected}>AI review selected{checks.length?` (${checks.length})`:''}</button>{checks.some(id=>queueState(listings.find((x:any)=>x.id===id))==='active')&&<button className="classicButton" disabled={busy} onClick={()=>updateQueueState('dismiss')}>Dismiss selected</button>}{checks.some(id=>queueState(listings.find((x:any)=>x.id===id))==='dismissed')&&<button className="classicButton" disabled={busy} onClick={()=>updateQueueState('restore')}>Restore selected</button>}<button className="classicButton primaryButton" disabled={!checks.length||busy||checks.every(id=>queueState(listings.find((x:any)=>x.id===id))==='promoted')} onClick={createProduct}>Create product from selected{checks.length?` (${checks.length})`:''}</button></div></div>
+   <div className="filterBar"><label>Status <select value={queueStatus} onChange={e=>{setQueueStatus(e.target.value);setChecks([])}}><option value="ACTIVE">Active</option><option value="PROMOTED">Promoted</option><option value="DISMISSED">Dismissed</option><option value="ALL">All</option></select></label><label>New <select value={queueFreshness} onChange={e=>setQueueFreshness(e.target.value)}><option value="ALL">All</option><option value="FRESH">New &lt;24h</option><option value="STALE">Older ≥24h</option></select></label><label>Signal <select value={queueSignal} onChange={e=>setQueueSignal(e.target.value)}><option value="ALL">All</option><option value="MUST_HAVE">MUST HAVE</option><option>GOOD</option><option>WATCHING</option><option>LOW SIGNAL</option><option>TOO EARLY</option></select></label><label>Order <select value={queueOrder} onChange={e=>setQueueOrder(e.target.value)}><option value="PROMISING">Most promising</option><option value="VELOCITY">Velocity</option><option value="CONFIDENCE">Confidence</option><option value="NEWEST">Newest</option></select></label><label className="searchLabel">Search <input value={queueSearch} onChange={e=>setQueueSearch(e.target.value)} placeholder="listing, title or seller"/></label></div>
    {selectionReview&&<div className="aiReview"><div className="aiReviewHead"><b>AI review of selected listings</b><button className="linkButton" onClick={()=>setSelectionReview(null)}>close</button></div><p>{selectionReview.summary}</p><div className="reviewGrid"><div><b>Why it may be worth promoting</b><p>{selectionReview.analysis?.reasons||'—'}</p></div><div><b>Risks / missing evidence</b><p>{selectionReview.analysis?.risks||'—'}</p></div><div><b>Next action</b><p>{selectionReview.analysis?.next_action||'—'}</p></div></div></div>}
    <div className="dataFrame queueFrame"><table className="queueTable"><thead><tr><th></th><th>Listing</th><th>Title / seller</th><th>Price</th><th>Views</th><th>Closes</th><th>Bid activity</th><th>Velocity <InfoTip>How quickly the listing is gaining views based on repeated observations.</InfoTip></th><th>Signal</th><th>Why</th><th>Last check</th><th>Next check</th><th>Failures</th></tr></thead><tbody>{lineageListings.map(({listing:x,depth})=>{
     const history=obsNewest(x);
     const priceRows=history.filter((o:any)=>obsPrice(o)!=null).map((o:any,i:number)=><span className="historyRow" key={`p-${o.captured_at}-${i}`}><b>{fmt(obsPrice(o),'$')}</b><small>{shortDate(o.captured_at)}</small></span>);
     const viewRows=history.filter((o:any)=>o.views!=null).map((o:any,i:number)=><span className="historyRow" key={`v-${o.captured_at}-${i}`}><b>{fmt(o.views)}</b><small>{shortDate(o.captured_at)}</small></span>);
     const bidRows=history.filter((o:any)=>o.bids!=null||o.current_bid_nzd!=null).map((o:any,i:number)=><span className="historyRow" key={`b-${o.captured_at}-${i}`}><b>{o.current_bid_nzd!=null?`${fmt(o.current_bid_nzd,'$')} current bid`:o.bids===0?'No bids':`${o.bids} bid${o.bids===1?'':'s'}`}</b><small>{o.bids!=null&&o.current_bid_nzd!=null?`${o.bids} bid${o.bids===1?'':'s'} · `:''}{shortDate(o.captured_at)}</small></span>);
-    const positive24=Number(x.signal?.views24h||0)>0;const tooEarly=x.signal?.label==='TOO EARLY';const isOwn=x.metadata?.ownership==='own';
+    const positive24=Number(x.signal?.views24h||0)>0;const tooEarly=x.signal?.label==='TOO EARLY';const isOwn=x.metadata?.ownership==='own';const state=queueState(x);const promotedProduct=state==='promoted'?products.find((p:any)=>p.id===x.product_id):null;
     const isNewIdRelist=Boolean(x.relisted_from);const episode=Number(x.lifecycle_episode||1);const isSameIdRelist=episode>1;const isRelist=isNewIdRelist||isSameIdRelist;
-    return <tr key={x.id} className={`queueRow ${depth>0?'relistChildRow':''} queue-${String(x.signal?.label||'TOO EARLY').replaceAll(' ','-').replaceAll('_','-')}`}><td><input type="checkbox" checked={checks.includes(x.id)} onChange={e=>setChecks(v=>e.target.checked?[...v,x.id]:v.filter(i=>i!==x.id))}/></td><td><div className={`listingLineage ${depth>0?'hasParent':''}`} style={{'--lineage-depth':Math.min(depth,4)} as any}>{depth>0&&<span className="lineageBranch" aria-hidden="true"/>}<div><div className="listingIdLine"><a href={x.url} target="_blank" rel="noreferrer">#{x.listing_id}</a>{isOwn&&<span className="ownTag">OWN</span>}{isRelist&&<span className="relistTag" title={isNewIdRelist?`Relisted from an earlier marketplace listing${x.relist_match_confidence!=null?` · ${Math.round(Number(x.relist_match_confidence)*100)}% lineage confidence`:''}`:`Same marketplace listing, lifecycle episode ${episode}`}>{isNewIdRelist?'RELIST':`RELIST · EP ${episode}`}</span>}</div><div className="secondary researchId">{listingResearchId(x)}</div>{isNewIdRelist&&<div className="secondary relistFrom">↳ new marketplace ID · linked to parent</div>}</div></div></td><td><b>{x.title||'—'}</b><div className="secondary">{x.seller||'unknown seller'} <span className="middleDot">·</span> Observations: {x.signal?.observationCount||0}</div></td><td><HoverHistory label="Price history" rows={priceRows}><span className="hoverValue">{fmt(x.signal?.price,'$')}</span></HoverHistory></td><td><HoverHistory label="View history" rows={viewRows}><span className="hoverValue"><b>{fmt(x.signal?.views)}</b>{x.signal?.views24h!=null&&<span className={positive24?'viewsDelta positive':'viewsDelta'}>{positive24?'↑':'→'} {Math.abs(Number(x.signal.views24h))} views in last 24h</span>}</span></HoverHistory></td><td><span className={x.signal?.closeDate&&nowMs!=null&&Date.parse(x.signal.closeDate)<=nowMs?'endedText':''}>{closeText(x.signal,nowMs)}</span>{x.signal?.closeDate&&<div className="secondary">{shortDate(x.signal.closeDate)}</div>}</td><td><HoverHistory label="Bid history" rows={bidRows} empty="This marketplace has not exposed bid activity for this listing yet."><span className="hoverValue">{x.signal?.currentBid!=null?<b>{fmt(x.signal.currentBid,'$')}</b>:x.signal?.bids===0?'No bids':x.signal?.bids!=null?`${x.signal.bids} bid${x.signal.bids===1?'':'s'}`:'—'}</span></HoverHistory></td><td>{x.signal?.velocity==null?'—':`${x.signal.velocity>=0?'+':''}${fmt(x.signal.velocity)}/day`}</td><td>{x.final_verdict?<><span className="signalText finalizedSignal">{String(x.final_verdict).replaceAll('_',' ')}</span><div className="secondary">Finalized · {x.closure_reason||'ended'}</div></>:<><span className={`signalText signal-${String(x.signal?.label||'').replaceAll(' ','-')}`}>{x.signal?.label||'—'}</span><div className="secondary">{fmt(x.signal?.confidence)}% confidence</div></>}</td><td className="whyCell">{tooEarly?<NullValue/>:<><div>{x.signal?.reason||'—'}</div><div className="confidenceWhy">{x.signal?.confidenceReason||''}</div></>}</td><td>{shortDate(x.last_observed_at||x.last_seen||x.first_seen)}</td><td>{x.active===false?<><span className="endedText">Stopped</span><div className="secondary">{x.closure_reason||'inactive'}</div></>:<>{shortDate(x.next_observation_at)}<div className="secondary">{x.cadence_reason||`${x.observation_interval_hours||24}h cadence`}</div></>}</td><td>{x.consecutive_failures||0}</td></tr>
+    return <tr key={x.id} className={`queueRow queueState-${state} ${depth>0?'relistChildRow':''} queue-${String(x.signal?.label||'TOO EARLY').replaceAll(' ','-').replaceAll('_','-')}`}><td><input type="checkbox" checked={checks.includes(x.id)} onChange={e=>setChecks(v=>e.target.checked?[...v,x.id]:v.filter(i=>i!==x.id))}/></td><td><div className={`listingLineage ${depth>0?'hasParent':''}`} style={{'--lineage-depth':Math.min(depth,4)} as any}>{depth>0&&<span className="lineageBranch" aria-hidden="true"/>}<div><div className="listingIdLine"><a href={x.url} target="_blank" rel="noreferrer">#{x.listing_id}</a>{isOwn&&<span className="ownTag">OWN</span>}{state==='promoted'&&<span className="queueStateTag promoted">✓ PROMOTED</span>}{state==='dismissed'&&<span className="queueStateTag dismissed">DISMISSED</span>}{isRelist&&<span className="relistTag" title={isNewIdRelist?`Relisted from an earlier marketplace listing${x.relist_match_confidence!=null?` · ${Math.round(Number(x.relist_match_confidence)*100)}% lineage confidence`:''}`:`Same marketplace listing, lifecycle episode ${episode}`}>{isNewIdRelist?'RELIST':`RELIST · EP ${episode}`}</span>}</div><div className="secondary researchId">{listingResearchId(x)}</div>{promotedProduct&&<button className="promotedProductLink" onClick={()=>openProduct(promotedProduct)}>→ {promotedProduct.name}</button>}{isNewIdRelist&&<div className="secondary relistFrom">↳ new marketplace ID · linked to parent</div>}</div></div></td><td><b>{x.title||'—'}</b><div className="secondary">{x.seller||'unknown seller'} <span className="middleDot">·</span> Observations: {x.signal?.observationCount||0}</div></td><td><HoverHistory label="Price history" rows={priceRows}><span className="hoverValue">{fmt(x.signal?.price,'$')}</span></HoverHistory></td><td><HoverHistory label="View history" rows={viewRows}><span className="hoverValue"><b>{fmt(x.signal?.views)}</b>{x.signal?.views24h!=null&&<span className={positive24?'viewsDelta positive':'viewsDelta'}>{positive24?'↑':'→'} {Math.abs(Number(x.signal.views24h))} views in last 24h</span>}</span></HoverHistory></td><td><span className={x.signal?.closeDate&&nowMs!=null&&Date.parse(x.signal.closeDate)<=nowMs?'endedText':''}>{closeText(x.signal,nowMs)}</span>{x.signal?.closeDate&&<div className="secondary">{shortDate(x.signal.closeDate)}</div>}</td><td><HoverHistory label="Bid history" rows={bidRows} empty="This marketplace has not exposed bid activity for this listing yet."><span className="hoverValue">{x.signal?.currentBid!=null?<b>{fmt(x.signal.currentBid,'$')}</b>:x.signal?.bids===0?'No bids':x.signal?.bids!=null?`${x.signal.bids} bid${x.signal.bids===1?'':'s'}`:'—'}</span></HoverHistory></td><td>{x.signal?.velocity==null?'—':`${x.signal.velocity>=0?'+':''}${fmt(x.signal.velocity)}/day`}</td><td>{x.final_verdict?<><span className="signalText finalizedSignal">{String(x.final_verdict).replaceAll('_',' ')}</span><div className="secondary">Finalized · {x.closure_reason||'ended'}</div></>:<><span className={`signalText signal-${String(x.signal?.label||'').replaceAll(' ','-')}`}>{x.signal?.label||'—'}</span><div className="secondary">{fmt(x.signal?.confidence)}% confidence</div></>}</td><td className="whyCell">{tooEarly?<NullValue/>:<><div>{x.signal?.reason||'—'}</div><div className="confidenceWhy">{x.signal?.confidenceReason||''}</div></>}</td><td>{shortDate(x.last_observed_at||x.last_seen||x.first_seen)}</td><td>{x.active===false?<><span className="endedText">Stopped</span><div className="secondary">{x.closure_reason||'inactive'}</div></>:<>{shortDate(x.next_observation_at)}<div className="secondary">{x.cadence_reason||`${x.observation_interval_hours||24}h cadence`}</div></>}</td><td>{x.consecutive_failures||0}</td></tr>
    })}{!lineageListings.length&&<tr><td colSpan={13} className="emptyCell">No listings match the current filters.</td></tr>}</tbody></table></div>
   </section>
 
