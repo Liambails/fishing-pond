@@ -1,5 +1,5 @@
 /*
- * COBALT V3.9.6 structured comparable-product matcher.
+ * COBALT V3.9.8 structured comparable-product matcher.
  *
  * Identity is hierarchical: fitment + part family + subtype/role are primary.
  * Cosine similarity and price compatibility are supporting evidence only.

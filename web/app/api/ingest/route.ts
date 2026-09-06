@@ -2,6 +2,7 @@ import { adminClient } from '../../../lib/supabase';
 import { detectMarketplace } from '../../../lib/marketplaces';
 import { matchListingIncrementally } from '../../../lib/comparableMatcher';
 import { detectNewIdRelist } from '../../../lib/relistMatcher';
+import { normalizeMarketplaceCloseDate } from '../../../lib/closeDate';
 
 function asNum(v: unknown) { if (v === null || v === undefined || v === '') return null; const n=Number(v); return Number.isFinite(n)?n:null; }
 function asIso(v: unknown) { if (!v) return null; const d=new Date(String(v)); return Number.isNaN(d.getTime())?null:d.toISOString(); }
@@ -84,7 +85,7 @@ export async function POST(req: Request) {
   const observation:any={
     listing_uuid:listing.id,captured_at:capturedAt,lifecycle_episode:Number(existing?.lifecycle_episode||listing?.lifecycle_episode||1),collector_version:raw.collector_version||null,listing_mode:raw.listing_mode||null,
     buy_now_nzd:asNum(raw.buy_now_nzd),asking_price_nzd:asNum(raw.asking_price_nzd),starting_price_nzd:asNum(raw.starting_price_nzd),current_bid_nzd:asNum(raw.current_bid_nzd),
-    views:asNum(raw.views),watchers:asNum(raw.watchers),bids:asNum(raw.bids),close_date:asIso(raw.close_date),close_remaining:raw.close_remaining||null,
+    views:asNum(raw.views),watchers:asNum(raw.watchers),bids:asNum(raw.bids),close_date:normalizeMarketplaceCloseDate(raw.close_date),close_remaining:raw.close_remaining||null,
     condition:raw.condition||null,location:raw.location||null,seller:raw.seller||null,seller_feedback_pct:asNum(raw.seller_feedback_pct),seller_feedback_count:asNum(raw.seller_feedback_count),
     seller_in_trade:raw.seller_in_trade??null,seller_address_verified:raw.seller_address_verified??null,seller_member_since:raw.seller_member_since||null,
     shipping_options:raw.shipping_options??null,pickup_available:raw.pickup_available??null,part_number:raw.part_number||null,part_number_candidates:raw.part_number_candidates??null,

@@ -41,3 +41,17 @@ export function nzCalendarDay(value: Date | string | number = new Date()) {
     day: '2-digit',
   }).format(d);
 }
+
+export function formatNZActivity(value: Date | string | number) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return new Intl.DateTimeFormat(NZ_LOCALE, {
+    timeZone: COBALT_TIME_ZONE,
+    day: '2-digit',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'short',
+  }).format(d);
+}
