@@ -9,16 +9,12 @@ def client():
 
 
 def due_listings(limit: int = 3):
-    now = datetime.now(timezone.utc).isoformat()
-    return (
-        client().table('listings').select('*')
-        .eq('active', True)
-        .lte('next_observation_at', now)
-        .order('priority', desc=True)
-        .order('next_observation_at')
-        .limit(limit)
-        .execute().data or []
-    )
+    now = datetime.now(timezone.utc).isoformat(); db=client()
+    active=(db.table('listings').select('*').eq('active',True).lte('next_observation_at',now).order('priority',desc=True).order('next_observation_at').limit(limit).execute().data or [])
+    # Closed listings are checked sparsely for a relist. They stay inactive so they never inflate live competitor counts.
+    watch=(db.table('listings').select('*').eq('lifecycle_state','relist_watch').lte('next_observation_at',now).order('next_observation_at').limit(limit).execute().data or [])
+    merged={x['id']:x for x in active+watch}
+    return sorted(merged.values(),key=lambda x:(0 if x.get('active') else 1,-int(x.get('priority') or 0),x.get('next_observation_at') or ''))[:limit]
 
 
 def normalize_close_date(v):
@@ -137,15 +133,10 @@ def final_verdict(observations, closure_reason=None):
     return verdict, score, a
 
 
-def _recent_observations(db, listing_uuid, limit=12):
-    return (
-        db.table('observations')
-        .select('captured_at,views,watchers,bids,buy_now_nzd,asking_price_nzd,current_bid_nzd,close_date')
-        .eq('listing_uuid', listing_uuid)
-        .order('captured_at', desc=True)
-        .limit(limit)
-        .execute().data or []
-    )
+def _recent_observations(db, listing_uuid, limit=12, episode=None):
+    q=(db.table('observations').select('captured_at,views,watchers,bids,buy_now_nzd,asking_price_nzd,current_bid_nzd,close_date,lifecycle_episode').eq('listing_uuid',listing_uuid))
+    if episode is not None: q=q.eq('lifecycle_episode',episode)
+    return q.order('captured_at',desc=True).limit(limit).execute().data or []
 
 
 def save_success(listing, raw):
@@ -157,8 +148,10 @@ def save_success(listing, raw):
     lid = listing['id']
     captured = raw.get('captured_at') or datetime.now(timezone.utc).isoformat()
     q = raw.get('extraction_quality') or {}
+    reopened = listing.get('lifecycle_state') == 'relist_watch' and not bool(raw.get('listing_ended'))
+    episode = int(listing.get('lifecycle_episode') or 1) + (1 if reopened else 0)
     obs = {
-        'listing_uuid': lid, 'captured_at': captured, 'collector_version': raw.get('collector_version'),
+        'listing_uuid': lid, 'captured_at': captured, 'lifecycle_episode': episode, 'collector_version': raw.get('collector_version'),
         'listing_mode': raw.get('listing_mode'), 'buy_now_nzd': raw.get('buy_now_nzd'),
         'asking_price_nzd': raw.get('asking_price_nzd'), 'starting_price_nzd': raw.get('starting_price_nzd'),
         'current_bid_nzd': raw.get('current_bid_nzd'), 'views': raw.get('views'), 'watchers': raw.get('watchers'),
@@ -176,7 +169,7 @@ def save_success(listing, raw):
         'quality_flags': q.get('warnings', raw.get('quality_flags') or []), 'raw_snapshot': raw
     }
     db.table('observations').upsert(obs, on_conflict='listing_uuid,captured_at').execute()
-    history = _recent_observations(db, lid)
+    history = _recent_observations(db, lid, episode=episode)
     ended = bool(raw.get('listing_ended'))
     patch = {
         'last_seen': captured, 'last_observed_at': captured, 'consecutive_failures': 0, 'last_error': None,
@@ -186,21 +179,34 @@ def save_success(listing, raw):
     if ended:
         reason = raw.get('listing_end_reason') or 'ended'
         verdict, score, evidence = final_verdict(history, reason)
+        checks=int(listing.get('relist_check_count') or 0)
+        # First close -> 6h, then 24h, then 72h. After the third still-closed check, retire the URL.
+        delays=[6,24,72]; terminal=listing.get('lifecycle_state')=='relist_watch' and checks>=3
+        next_check=None if terminal else (datetime.now(timezone.utc)+timedelta(hours=delays[min(checks,len(delays)-1)])).isoformat()
         patch.update({
-            'active': False, 'next_observation_at': None, 'observation_interval_hours': listing.get('observation_interval_hours', 24),
-            'finalized_at': captured, 'final_verdict': verdict, 'final_score': score,
-            'final_evidence': evidence, 'closure_reason': reason, 'cadence_reason': 'listing finalized'
+            'active': False, 'lifecycle_state': 'terminal_closed' if terminal else 'relist_watch',
+            'next_observation_at': next_check, 'relist_check_count': checks+1 if listing.get('lifecycle_state')=='relist_watch' else 0,
+            'relist_watch_until': (datetime.now(timezone.utc)+timedelta(days=7)).isoformat() if listing.get('lifecycle_state')!='relist_watch' else listing.get('relist_watch_until'),
+            'observation_interval_hours': listing.get('observation_interval_hours',24), 'finalized_at': captured, 'final_verdict': verdict, 'final_score': score,
+            'final_evidence': evidence, 'closure_reason': reason, 'cadence_reason': 'listing closed permanently after relist watch' if terminal else f'closed · relist watch next check {next_check}'
         })
+        try:
+            db.table('listing_lifecycle_events').insert({'listing_uuid':lid,'listing_family_id':listing.get('listing_family_id') or lid,'marketplace':listing.get('marketplace') or 'Trade Me','marketplace_listing_id':listing.get('listing_id'),'episode':episode,'event_type':'terminal_closed' if terminal else ('relist_check_still_closed' if listing.get('lifecycle_state')=='relist_watch' else 'closed_relist_watch'),'occurred_at':captured,'reason':{'closure_reason':reason,'check_count':checks,'next_check':next_check}}).execute()
+        except Exception as e: print(f'WARNING: lifecycle event write failed: {e}')
     else:
         hours, reason, evidence = adaptive_cadence_hours(listing, history)
         own = str((listing.get('metadata') or {}).get('ownership') or '').lower() == 'own'
         priority = 95 if own else (88 if hours <= 6 else 80 if hours <= 8 else 68 if hours <= 12 else 50)
         patch.update({
-            'active': True, 'observation_interval_hours': hours, 'priority': priority,
+            'active': True, 'lifecycle_state': 'active', 'lifecycle_episode': episode, 'relist_check_count': 0, 'relist_watch_until': None, 'last_relisted_at': captured if reopened else listing.get('last_relisted_at'), 'observation_interval_hours': hours, 'priority': priority,
             'next_observation_at': (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat(),
             'cadence_reason': reason, 'finalized_at': None, 'final_verdict': None, 'final_score': None,
             'final_evidence': {}, 'closure_reason': None
         })
+        if reopened:
+            patch['cadence_reason']='relisted · same marketplace ID'
+            try: db.table('listing_lifecycle_events').insert({'listing_uuid':lid,'listing_family_id':listing.get('listing_family_id') or lid,'marketplace':listing.get('marketplace') or 'Trade Me','marketplace_listing_id':listing.get('listing_id'),'episode':episode,'event_type':'relisted_same_id','occurred_at':captured,'confidence':1,'reason':{'detected':'closed URL became active again'}}).execute()
+            except Exception as e: print(f'WARNING: relist lifecycle event write failed: {e}')
     db.table('listings').update(patch).eq('id', lid).execute()
     try:
         db.table('collection_errors').update({
@@ -211,6 +217,62 @@ def save_success(listing, raw):
         # Recovery metadata is additive; never turn a successful observation into a failed run.
         pass
 
+
+
+def register_explicit_relist(parent, relist):
+    """Idempotently register a marketplace-explicit new-ID successor.
+
+    Returns (successor_listing, created_now). Existing successors are never reactivated here;
+    that preserves CAPTCHA/manual-recovery pauses and the successor's own scheduler state.
+    """
+    db=client(); now=datetime.now(timezone.utc).isoformat()
+    new_id=str((relist or {}).get('listing_id') or '').strip()
+    new_url=str((relist or {}).get('url') or '').strip()
+    if not new_id or not new_url or new_id == str(parent.get('listing_id') or ''):
+        return None, False
+    existing=(db.table('listings').select('*').eq('marketplace',parent.get('marketplace') or 'Trade Me').eq('listing_id',new_id).limit(1).execute().data or [])
+    family=parent.get('listing_family_id') or parent['id']
+    episode=int(parent.get('lifecycle_episode') or 1)+1
+    created=False
+    if existing:
+        child=existing[0]
+        # Fill relationship fields only when absent. Never overwrite a different established
+        # lineage or scheduling/failure state merely because the old page is revisited.
+        patch={}
+        if not child.get('relisted_from'): patch['relisted_from']=parent['id']
+        if not child.get('listing_family_id'): patch['listing_family_id']=family
+        if int(child.get('lifecycle_episode') or 1) < episode: patch['lifecycle_episode']=episode
+        if patch:
+            db.table('listings').update(patch).eq('id',child['id']).execute()
+            child={**child,**patch}
+    else:
+        metadata=dict(parent.get('metadata') or {})
+        metadata.update({'discovery_source':'marketplace_explicit_relist_link','explicit_relist_from':str(parent.get('listing_id') or '')})
+        row={
+            'product_id':parent.get('product_id'),'marketplace':parent.get('marketplace') or 'Trade Me',
+            'listing_id':new_id,'url':new_url,'source_url':new_url,'title':None,'seller':parent.get('seller'),
+            'active':True,'first_seen':now,'next_observation_at':now,'observation_interval_hours':6,
+            'priority':max(90,int(parent.get('priority') or 50)),'consecutive_failures':0,'metadata':metadata,
+            'listing_family_id':family,'relisted_from':parent['id'],'lifecycle_state':'active','lifecycle_episode':episode,
+            'relist_check_count':0,'relist_watch_until':None,'last_relisted_at':now,'cadence_reason':'discovered via explicit marketplace relist link'
+        }
+        child=db.table('listings').insert(row).execute().data[0]; created=True
+    # The old URL has done its job. Stop sparse relist polling once the marketplace itself has
+    # supplied a concrete successor. The child owns future observations/recovery from here.
+    db.table('listings').update({
+        'active':False,'lifecycle_state':'terminal_closed','next_observation_at':None,
+        'cadence_reason':f'explicit relist successor discovered · {new_id}'
+    }).eq('id',parent['id']).execute()
+    # Lifecycle insert is idempotent at application level: don't duplicate the same edge.
+    prior=(db.table('listing_lifecycle_events').select('id').eq('listing_uuid',child['id']).eq('previous_listing_uuid',parent['id']).eq('event_type','relisted_explicit_link').limit(1).execute().data or [])
+    if not prior:
+        db.table('listing_lifecycle_events').insert({
+            'listing_uuid':child['id'],'listing_family_id':family,'marketplace':parent.get('marketplace') or 'Trade Me',
+            'marketplace_listing_id':new_id,'episode':episode,'event_type':'relisted_explicit_link',
+            'previous_listing_uuid':parent['id'],'occurred_at':now,'confidence':1,
+            'reason':{'detected':'marketplace explicit relist link','source_listing_id':parent.get('listing_id'),'anchor_text':(relist or {}).get('anchor_text'),'url':new_url}
+        }).execute()
+    return child, created
 
 def save_failure(listing, error):
     db = client()

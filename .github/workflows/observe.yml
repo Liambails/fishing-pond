@@ -2,7 +2,6 @@ name: COBALT observations
 on:
   workflow_dispatch:
   schedule:
-    # Six scheduler wake-ups per hour. The due queue decides whether any browser collection is needed.
     - cron: '7,17,27,37,47,57 * * * *'
       timezone: 'Pacific/Auckland'
 concurrency:
@@ -15,41 +14,123 @@ jobs:
     defaults:
       run:
         working-directory: worker
+    env:
+      COBALT_VERSION: '3.9.8'
+      MAX_LISTINGS_PER_RUN: '12'
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      COBALT_WEB_URL: 'https://fishing-pond-seven.vercel.app'
+      COBALT_INGEST_TOKEN: ${{ secrets.COBALT_INGEST_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install Python dependencies
+
+      # Standard-library-only heartbeat: runs before pip so bootstrap failures are visible.
+      - name: Record scheduler wake
+        continue-on-error: true
+        run: python scheduler_telemetry.py start
+
+      - name: Install and verify Python dependencies
+        id: deps
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
+          set -o pipefail
+          python -m pip install --upgrade pip 2>&1 | tee -a scheduler_debug.log
+          success=false
           for attempt in 1 2 3; do
-            pip install -r requirements.txt && break
-            if [ "$attempt" = "3" ]; then exit 1; fi
-            echo "Dependency install failed (attempt $attempt/3); retrying in $((attempt * 10))s..."
-            sleep $((attempt * 10))
+            echo "Dependency attempt $attempt/3" | tee -a scheduler_debug.log
+            if pip install -r requirements.txt 2>&1 | tee -a scheduler_debug.log; then
+              success=true
+              echo "DEPENDENCY_ATTEMPTS=$attempt" >> "$GITHUB_ENV"
+              break
+            fi
+            if [ "$attempt" != "3" ]; then
+              delay=$((attempt * 10))
+              echo "Dependency install failed; retrying in ${delay}s" | tee -a scheduler_debug.log
+              sleep "$delay"
+            fi
           done
-          python -c "import playwright, supabase, dotenv; print('Python dependencies ready')"
+          if [ "$success" != "true" ]; then
+            python scheduler_telemetry.py bootstrap_failed "pip install failed after 3 attempts" || true
+            exit 1
+          fi
+          if ! python -c "import playwright, supabase, dotenv; print('Python dependencies verified')" 2>&1 | tee -a scheduler_debug.log; then
+            python scheduler_telemetry.py bootstrap_failed "dependency import verification failed" || true
+            exit 1
+          fi
+          python scheduler_telemetry.py dependencies_ok || true
+
       - name: Check whether anything is due
         id: due
+        shell: bash
         run: |
+          set -o pipefail
+          success=false
           for attempt in 1 2 3 4; do
-            python due_check.py && exit 0
-            if [ "$attempt" = "4" ]; then exit 1; fi
-            echo "Due preflight failed (attempt $attempt/4); retrying in $((attempt * 15))s..."
-            sleep $((attempt * 15))
+            echo "Preflight attempt $attempt/4" | tee -a scheduler_debug.log
+            if python due_check.py 2>&1 | tee -a scheduler_debug.log; then
+              success=true
+              echo "PREFLIGHT_ATTEMPTS=$attempt" >> "$GITHUB_ENV"
+              break
+            fi
+            if [ "$attempt" != "4" ]; then
+              delay=$((attempt * 15))
+              echo "Due preflight failed; retrying in ${delay}s" | tee -a scheduler_debug.log
+              sleep "$delay"
+            fi
           done
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          if [ "$success" != "true" ]; then
+            python scheduler_telemetry.py preflight_failed "due_check.py failed after 4 attempts" || true
+            exit 1
+          fi
+
       - name: Install Chromium
         if: steps.due.outputs.due == 'true' || github.event_name == 'workflow_dispatch'
-        run: python -m playwright install --with-deps chromium
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! python -m playwright install --with-deps chromium 2>&1 | tee -a scheduler_debug.log; then
+            python scheduler_telemetry.py chromium_failed "playwright chromium install failed" || true
+            exit 1
+          fi
+
       - name: Collect due listings
         if: steps.due.outputs.due == 'true' || github.event_name == 'workflow_dispatch'
-        run: python run.py
+        shell: bash
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          MAX_LISTINGS_PER_RUN: '12'
           HEADLESS: 'true'
+        run: |
+          set -o pipefail
+          if ! python run.py 2>&1 | tee -a scheduler_debug.log; then
+            python scheduler_telemetry.py worker_failed "run.py returned non-zero" || true
+            exit 1
+          fi
+
+      - name: Write GitHub step summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## COBALT scheduler diagnostics"
+            echo "- Run ID: $GITHUB_RUN_ID"
+            echo "- Attempt: $GITHUB_RUN_ATTEMPT"
+            echo "- Event: $GITHUB_EVENT_NAME"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- COBALT: $COBALT_VERSION"
+            echo "- Due output: ${{ steps.due.outputs.due }}"
+            echo "- Due count: ${{ steps.due.outputs.due_count }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload scheduler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobalt-scheduler-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            worker/scheduler_debug.log
+            worker/scheduler_debug.jsonl
+          if-no-files-found: ignore
+          retention-days: 14
