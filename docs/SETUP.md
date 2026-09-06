@@ -1,6 +1,6 @@
 # COBALT — setup and deployment
 
-Current release: **V3.9.10**. This guide assumes the active local repository is `~/cobalt`.
+Current release: **V3.9.11**. This guide assumes the active local repository is `~/cobalt`.
 
 ## Prerequisites
 
@@ -74,12 +74,13 @@ OPENAI_API_KEY          # only if AI features are enabled
 OPENAI_MODEL            # optional
 ```
 
-Build locally before deployment:
+Build and run the intelligence regression suite locally before deployment:
 
 ```bash
 cd ~/cobalt/web
-rm -rf .next
 npm install
+npm run test:intelligence
+rm -rf .next
 npm run build
 ```
 
@@ -89,7 +90,9 @@ After deploy, verify `/api/health` and confirm it reports the expected release.
 
 Load `extension-v2/` unpacked in Chrome Developer Mode. Configure its endpoint to the deployed `/api/ingest` and use the same ingest token configured server-side.
 
-Manual capture should append/upsert the canonical listing and observation without creating duplicate marketplace identities.
+Manual capture should upsert the canonical listing without creating duplicate marketplace identities. The extension retries rendered-page collection across several short windows when views are not available yet. Complete same-source captures within 3 minutes are coalesced into one observation episode, so retries do not become independent evidence.
+
+Durable save-state is stored through listing metadata. A complete initial capture disables the button as `Saved ✓`; revisiting an already-complete listing shows `Already Saved ✓`. A partial capture does not establish durable saved state, so the capture action remains available for recovery.
 
 ## First end-to-end acceptance test
 
@@ -104,3 +107,35 @@ Manual capture should append/upsert the canonical listing and observation withou
 9. Confirm scheduler heartbeat -> due selection -> worker -> observation -> cadence update -> matcher trace.
 
 See [`OPERATIONS_AND_TROUBLESHOOTING.md`](OPERATIONS_AND_TROUBLESHOOTING.md) for incident diagnosis.
+
+
+## Source-only update workflow
+
+Normal COBALT releases should update source files inside the existing `~/cobalt` repository rather than replacing the repository itself. Keep these local files in place:
+
+```text
+~/cobalt/.git/
+~/cobalt/web/.env.local
+~/cobalt/worker/.env
+```
+
+Release ZIPs should not contain `.git`, `.env.local`, or `.env`. Copy/merge the source update into `~/cobalt`, run tests/build, inspect `git status`, commit, and push. Ignored local env files remain in place because an incoming source-only update does not overwrite paths it does not contain. Production secrets belong in Vercel/GitHub/worker secret stores rather than Git history.
+
+For a normal release after files are merged:
+
+```bash
+cd ~/cobalt/web
+npm run test:intelligence
+rm -rf .next
+npm run build
+
+cd ~/cobalt
+git status
+git add -A
+git commit -m "COBALT Vx.y.z - <release summary>"
+git fetch origin
+git status
+git push origin main
+```
+
+Do not force-push as part of the routine deployment path. If `git fetch origin` reports divergence, reconcile it before pushing.

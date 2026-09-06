@@ -12,7 +12,7 @@ COBALT is Motera's product-opportunity research system. It turns marketplace lis
 
 COBALT deliberately separates **collection**, **identity**, **market intelligence**, and **sourcing decisions**. A high view count is evidence of attention, not proof of a sale.
 
-Current release: **V3.9.10 — Capture Stabilization + Observation Episodes**.
+Current release: **V3.9.11 — Observation Decision Inbox + UI Layering**.
 
 ## End-to-end architecture
 
@@ -76,6 +76,10 @@ docs/                    maintained engineering/operations documentation
 ### Manual capture
 
 The Chrome extension runs the current-page collector against a marketplace page and POSTs the resulting snapshot to `/api/ingest`. Manual capture is useful for discovering new listings and for explicit recovery/testing.
+
+V3.9.10 stabilizes Trade Me capture before ingestion: the extension retries several short render windows when the view count is temporarily absent and uses conservative semantic/text extraction rather than interpreting arbitrary page numbers as views. Complete same-source captures arriving within 3 minutes are treated as one observation episode; the freshest values update the existing observation while compact raw samples remain in `raw_snapshot._capture_episode`. Source-family or listing-ended changes create a separate observation.
+
+The extension also has durable saved-state semantics. A complete initial capture marks the listing as completely captured and disables the action as `Saved ✓`; a later revisit resolves to `Already Saved ✓`. Partial captures are retained for diagnostics/recovery but do not establish the durable saved state, so the user can try again once the page has fully rendered.
 
 ### Automatic capture
 
@@ -141,7 +145,7 @@ A manual `Not comparable` decision is durable and prevents the automatic matcher
 
 ## Comparable Market Engine
 
-V3.9.8 uses deterministic **hybrid-v2** matching. It is not pure cosine similarity.
+V3.9.11 uses deterministic **hybrid-v2** matching. It is not pure cosine similarity.
 
 The matcher first derives structured automotive identity:
 
@@ -161,13 +165,21 @@ Structured subtype conflicts are hard rejects. Vehicle make/model/chassis and pa
 
 Accepted comparable match confidence is then used to weight market pricing. See `ALGORITHMS_AND_FORMULAS.md`.
 
-## Listing attention vs product opportunity
+## Listing attention, Observation Decision Inbox, and product opportunity
 
 These are deliberately separate concepts.
 
-**Observation Queue / listing signal** asks whether an individual listing is receiving unusual recent attention. It uses recent view velocity, acceleration, close-stage context, watchers/bids when available, peer-relative velocity, and evidence quality.
+**Listing signal** asks whether an individual listing is receiving unusual recent attention. It uses recent trusted view velocity, acceleration, close-stage context, watchers/bids when available, peer-relative velocity, and evidence quality. Rapid observations do not become independent evidence merely because they are separate raw captures.
+
+**Observation Queue** is the human decision inbox over that research. It defaults to unresolved `active` listings and orders them by **Most promising**, heavily prioritizing signal class and then confidence, trusted velocity, independent evidence depth, and recent view growth. Operators can alternatively order by Velocity, Confidence, or Newest and filter by Active, Promoted, Dismissed, or All.
+
+Creating (or automatically promoting) a Product changes the source listing to `promoted`, records `product_id`, and removes it from the default Active queue without deleting its listing/observation evidence. Manual dismissal similarly removes a candidate from Active while preserving its history; it can later be restored. Queue status and decision time are stored in existing listing metadata, so V3.9.11 requires no migration.
 
 **Product metrics** aggregate accepted comparable listings and combine demand, competition, margin, evidence, fitment, supplier readiness, and operational risk. Product metrics should never be interpreted as proof of sales where the marketplace does not expose a sale event.
+
+## Dashboard interaction behavior
+
+V3.9.11 keeps table context visible during research. Observation Queue and My Products both use scrollable table frames with sticky column headers. Help/info popovers are rendered through a document-level portal so they sit above scroll containers and sticky headers rather than being clipped underneath table viewports. Product/detail modal backdrops remain fixed above the application chrome.
 
 ## Scheduler observability
 
@@ -232,4 +244,4 @@ Automation Health intentionally exposes two different timestamps: the last succe
 
 ### Close-date normalization
 
-Collectors attempt to capture `close_date` on every observation, including the first manual capture. V3.9.8 normalizes Trade Me human NZ-local close strings during API ingestion using `Pacific/Auckland`; automatic worker captures already perform equivalent normalization in Python. Missing close dates now mean the marketplace did not expose a recognized close value on that capture, rather than an intentional second-observation rule.
+Collectors attempt to capture `close_date` on every observation, including the first manual capture. V3.9.11 normalizes Trade Me human NZ-local close strings during API ingestion using `Pacific/Auckland`; automatic worker captures already perform equivalent normalization in Python. Missing close dates now mean the marketplace did not expose a recognized close value on that capture, rather than an intentional second-observation rule.

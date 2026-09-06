@@ -1,6 +1,6 @@
 # COBALT — algorithms and formulas
 
-This document describes the deterministic calculations in the current V3.9.10 codebase. When thresholds/formulas change, update this file in the same commit.
+This document describes the deterministic calculations in the current V3.9.11 codebase. When thresholds/formulas change, update this file in the same commit.
 
 ## 0. Capture episodes
 
@@ -104,6 +104,32 @@ Raw captures inside the same <3h window remain visible in history and are report
 - `MUST_HAVE` — internal strict state: attention >=88, confidence >=80, >=4 observations, >=30h span, and peer corroboration.
 
 `GOOD` generally requires >=3 independent evidence windows, >=20h evidence span and confidence >=55. Peer-corroborated promotion also requires the recent independent interval to span at least 6h. An isolated listing requires >=4 independent evidence windows, recent trusted velocity >=6 views/day, and a fully trusted recent interval of at least 12h. `MUST_HAVE` uses the same independent-window discipline.
+
+### Observation Queue decision lifecycle and ordering
+
+The Observation Queue is a decision inbox rather than an all-history table. A listing resolves to one of three operational states:
+
+```text
+active     -> unresolved marketplace research
+promoted   -> used to create/link a Product
+dismissed  -> deliberately removed from active consideration
+```
+
+`All` is a view across all three states. If `metadata.observation_queue_status` is absent, a listing with `product_id` is treated as `promoted`; otherwise it is treated as `active`. Dismiss/restore writes `observation_queue_status` and `observation_queue_decided_at` into existing `listings.metadata` JSONB. Promoting a listing writes `product_id`, marks the queue state `promoted`, and retains the source-listing provenance. No schema migration is required.
+
+The default **Most promising** order is deterministic. The internal priority is:
+
+```text
+priority = signal_weight * 10000
+         + confidence * 50
+         + clamped_velocity * 20
+         + independent_evidence_count * 25
+         + positive_views_24h * 5
+```
+
+Where signal weights are `MUST_HAVE=5`, `GOOD=4`, `WATCHING=3`, `LOW SIGNAL=2`, `TOO EARLY=1`; confidence is clamped to 0–100, velocity to -20..100, independent evidence count to 0–10, and positive 24h view growth to 0–100. Signal class intentionally dominates the ordering. Ties fall back to the most recently observed listing. Alternate queue orders are Velocity, Confidence, and Newest.
+
+The dashboard's **Promising** counter currently counts active `MUST_HAVE`, `GOOD`, and `WATCHING` listings.
 
 ## 3. Adaptive observation cadence
 

@@ -151,7 +151,7 @@ When an API error says a column is missing from the PostgREST schema cache:
 NOTIFY pgrst, 'reload schema';
 ```
 
-Current V3.9.8 requires migrations through `012_structured_comparable_identity.sql`.
+Current V3.9.11 requires migrations through `012_structured_comparable_identity.sql`; V3.9.9–V3.9.11 add no new schema migrations.
 
 ## Local build/deployment checks
 
@@ -226,3 +226,35 @@ If a closed page has no valid explicit successor link, the existing sparse relis
 ## Missing listing close/expiry date
 
 `close_date` is attempted on every capture. It is not a second-observation field. V3.9.8 fixes the manual-ingest gap where Trade Me strings such as `Sun 6 Sep, 8:30pm` could be present in the extension payload but become `NULL` because generic JavaScript date parsing rejected them. Manual ingest now interprets recognized human values in `Pacific/Auckland`, matching the automatic worker behavior. If a fresh V3.9.8 observation still has no close date, inspect the raw snapshot `close_date`, `close_remaining`, and source provenance; the marketplace may have omitted or changed the close-time markup.
+
+
+## Manual capture stabilization and saved-state
+
+When a Trade Me page initially renders without a view count, the V3.9.10 extension retries collection across several short windows before submitting a partial snapshot. During the retry period the button may show `Waiting for views…`. Do not diagnose a temporary first-render miss as a collector failure until those retries have completed.
+
+A complete initial capture establishes durable saved state. Expected button states are:
+
+```text
+complete first save       -> Saved ✓
+revisit already complete  -> Already Saved ✓
+partial/incomplete capture -> Capture remains available
+```
+
+Rapid complete captures from the same source family within 3 minutes are coalesced at `/api/ingest`. If investigating unexpected observation counts, inspect `raw_snapshot._capture_episode` for `count`, first/last capture time, source kind, and compact samples. Historical seconds-apart rows may still exist from older versions; V3.9.9 scoring ignores them as independent evidence even when the database history has not been rewritten.
+
+## Observation Queue lifecycle troubleshooting
+
+The default queue is **Active**, not all historical research. A listing is treated as promoted when `product_id` exists, even if older metadata lacks an explicit queue status. Explicit lifecycle metadata lives in `listings.metadata`:
+
+```text
+observation_queue_status: active | promoted | dismissed
+observation_queue_decided_at: ISO timestamp or null
+```
+
+`PATCH /api/observation-queue` accepts selected listing IDs plus `dismiss` or `restore`. Rows already linked to a Product are skipped rather than being restored/dismissed. Product creation and auto-promotion set `product_id` and mark the listing promoted.
+
+If a promoted listing appears in Active, first confirm the dashboard received the current `product_id`/metadata values and that the V3.9.11 web deployment is active. If a dismissed listing seems missing, switch Status to `Dismissed` or `All`; dismissal intentionally preserves the listing and observations while removing it from unresolved work.
+
+## Dashboard layering and sticky-header checks
+
+Help/info popovers should appear above table scroll frames and sticky headers. Observation Queue and My Products should both keep their `<thead>` labels visible while scrolling their data frame. If a popover is clipped beneath a table after V3.9.11, verify the current CSS/JS bundle is deployed rather than debugging data or API state.

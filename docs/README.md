@@ -4,7 +4,7 @@ This directory is the maintained documentation set for COBALT. The repository ro
 
 ## Start here
 
-- [`SYSTEM_OVERVIEW.md`](SYSTEM_OVERVIEW.md) — what COBALT is, the complete data flow, repository layout, database model, lifecycle, deployment model, and current V3.9.8 capabilities.
+- [`SYSTEM_OVERVIEW.md`](SYSTEM_OVERVIEW.md) — what COBALT is, the complete data flow, repository layout, database model, lifecycle, deployment model, and current V3.9.11 capabilities.
 - [`ALGORITHMS_AND_FORMULAS.md`](ALGORITHMS_AND_FORMULAS.md) — deterministic scoring, cadence, comparable matching, cosine similarity, similarity-weighted pricing, relist matching, and decision thresholds.
 - [`OPERATIONS_AND_TROUBLESHOOTING.md`](OPERATIONS_AND_TROUBLESHOOTING.md) — scheduler observability, common failure modes, debugging sequence, logs, health checks, and recovery procedures.
 - [`SETUP.md`](SETUP.md) — first-time local/Supabase/Vercel/GitHub/extension setup.
@@ -16,4 +16,4 @@ The docs describe the **current implementation**, not a diary of every patch. Wh
 
 Historical release notes are consolidated in [`RELEASE_HISTORY.md`](RELEASE_HISTORY.md). Do not add new root-level `Vx_y_RELEASE.md` files unless there is a strong reason to preserve a one-off migration note.
 
-Current application release: **V3.9.10 — Capture Stabilization + Observation Episodes**.
+Current application release: **V3.9.11 — Observation Decision Inbox + UI Layering**.

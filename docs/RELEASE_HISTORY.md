@@ -21,6 +21,7 @@
 - Source-family and listing-ended state changes are never coalesced together.
 - Added a seconds-apart `16 → 16 → 19` regression proving that this burst remains `TOO EARLY` with no velocity instead of extrapolating ~18,000 views/day.
 - Extension cloud endpoint now defaults to the production `/api/ingest` URL rather than localhost.
+- Complete initial manual captures establish durable saved-state metadata: first completion shows `Saved ✓`, revisits show `Already Saved ✓`, and incomplete/partial captures remain retryable rather than disabling the capture action.
 - No database migration is required.
 
 This is a compact engineering history. Current behavior belongs in the maintained system/algorithm/operations docs rather than in release-note sprawl.
