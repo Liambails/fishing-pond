@@ -1,3 +1,4 @@
+import {buildIdf,genericListingSimilarity,listingDocument} from './genericSimilarity';
 export type Obs = {
   captured_at?:string;
   views?:number|null;
@@ -179,27 +180,12 @@ function engagementScore(latest?:Obs){
   return behaviouralIntentScore(latest||null);
 }
 
-function inferPart(title=''){
-  const t=title.toLowerCase();
-  if(t.includes('master')&&t.includes('window'))return 'master-window-switch';
-  if(t.includes('window switch'))return 'window-switch';
-  if(t.includes('combination'))return 'combination-switch';
-  if(t.includes('wiper'))return 'wiper-switch';
-  if(t.includes('headlight'))return 'headlight-switch';
-  if(t.includes('ignition'))return 'ignition-switch';
-  if(t.includes('seat belt'))return 'seat-belt';
-  if(t.includes('console')&&t.includes('switch'))return 'console-switch';
-  return 'other';
-}
 export function comparableKey(listing:Listing){
-  const md=listing.metadata&&typeof listing.metadata==='object'?listing.metadata:{};
-  const title=listing.title||'';
-  const t=title.toLowerCase();
-  const make=(md.vehicle||t.includes('toyota')?'Toyota':'').toLowerCase();
-  const model=(md.vehicle||t.includes('aqua')?'Aqua':'').toLowerCase();
-  const chassis=String(md.chassis||(title.match(/\bNHP10\b/i)||[])[0]||'').toLowerCase();
-  const part=String(md.part_type||inferPart(title)).toLowerCase().replace(/\s+/g,'-');
-  return [make,model,chassis,part].join('|');
+  // Legacy/export helper only. Peer corroboration no longer groups by vehicle-specific keys;
+  // it uses category-agnostic TF-IDF similarity below.
+  const category=(listing.metadata?.category_path||[]);
+  const categoryText=Array.isArray(category)?category.join('>'):String(category||'');
+  return `${categoryText}|${listingDocument(listing)}`;
 }
 
 function baseSignal(listing:Listing){
@@ -228,13 +214,16 @@ function baseSignal(listing:Listing){
 }
 
 export function computeListingSignals(listings:Listing[]){
-  const bases=listings.map(l=>({listing:l,...baseSignal(l),key:comparableKey(l)}));
-  const groups=new Map<string,typeof bases>();
-  for(const b of bases){const g=groups.get(b.key)||[];g.push(b);groups.set(b.key,g)}
+  const bases=listings.map(l=>({listing:l,...baseSignal(l)}));
+  const idf=buildIdf(bases.map(b=>listingDocument(b.listing)));
 
   return bases.map(b=>{
     const isOwn=b.listing.metadata?.ownership==='own';
-    const peerGroup=(groups.get(b.key)||[]).filter(x=>x.listing.id!==b.listing.id&&x.velocity!=null&&(isOwn||x.listing.metadata?.ownership!=='own'));
+    const peerGroup=bases.filter(x=>{
+      if(x.listing.id===b.listing.id||x.velocity==null||(!isOwn&&x.listing.metadata?.ownership==='own'))return false;
+      const similarity=genericListingSimilarity(b.listing,x.listing,idf);
+      return similarity.score>=.64&&similarity.cosine>=.52&&(similarity.category>=.25||similarity.identifierOverlap);
+    });
     const peerVelocities=peerGroup.map(x=>Number(x.velocity));
     const peerMedian=median(peerVelocities);
     const relativeRatio=b.velocity!=null&&peerMedian!=null&&peerMedian>.1?b.velocity/peerMedian:null;
@@ -272,7 +261,7 @@ export function computeListingSignals(listings:Listing[]){
     const earlyStrong=b.independentObservationCount===2&&attention>=72&&b.velocity!=null;
     // GOOD requires repeated, temporally independent confirmation. Raw captures that land
     // inside the same <3h window remain visible history but cannot unlock stronger labels.
-    const goodEvidenceReady=b.independentObservationCount>=3&&spanReady&&confidence>=55;
+    const goodEvidenceReady=b.independentObservationCount>=4&&spanReady&&confidence>=55;
     const standaloneConfirmed=b.independentObservationCount>=4&&b.velocity!=null&&b.velocity>=6&&(b.velocityIntervalHours??0)>=FULL_VELOCITY_TRUST_HOURS;
     const corroboratedConfirmed=corroborated&&(b.velocityIntervalHours??0)>=6;
 

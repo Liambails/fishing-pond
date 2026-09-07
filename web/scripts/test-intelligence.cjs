@@ -4,14 +4,18 @@ const path = require('path');
 const ts = require('typescript');
 const vm = require('vm');
 
-const source = fs.readFileSync(path.join(__dirname, '..', 'lib', 'intelligence.ts'), 'utf8');
-const javascript = ts.transpileModule(source, {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-}).outputText;
-const mod = { exports: {} };
-vm.runInNewContext(javascript, { module: mod, exports: mod.exports, require, console, Date, Math, Number, String, Object, Array, Set, Map, JSON }, { filename: 'intelligence.js' });
+function loadTsModule(filename, deps={}) {
+  const source = fs.readFileSync(filename, 'utf8');
+  const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+  const mod = { exports: {} };
+  const localRequire = name => Object.prototype.hasOwnProperty.call(deps,name) ? deps[name] : require(name);
+  vm.runInNewContext(javascript, { module: mod, exports: mod.exports, require: localRequire, console, Date, Math, Number, String, Object, Array, Set, Map, JSON }, { filename });
+  return mod.exports;
+}
+const genericSimilarity = loadTsModule(path.join(__dirname, '..', 'lib', 'genericSimilarity.ts'));
+const intelligence = loadTsModule(path.join(__dirname, '..', 'lib', 'intelligence.ts'), {'./genericSimilarity': genericSimilarity});
 
-const { computeListingSignal } = mod.exports;
+const { computeListingSignal } = intelligence;
 const now = Date.now();
 const at = hoursAgo => new Date(now - hoursAgo * 3600000).toISOString();
 const listing = observations => ({
@@ -82,3 +86,8 @@ assert.equal(intentRich.questionCount, 5);
 assert.notEqual(intentRich.label, 'MUST_HAVE', 'buyer intent must not bypass repeated evidence requirements');
 
 console.log('marketplace-intent regression tests passed');
+
+// V3.9.17: GOOD is never available with only three independent observations,
+// even when attention/buyer intent or peer context is strong.
+assert.notEqual(intentRich.label, 'GOOD', 'three independent observations must never unlock GOOD');
+console.log('four-window GOOD gate regression test passed');

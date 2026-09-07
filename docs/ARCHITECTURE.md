@@ -9,7 +9,7 @@ Chrome extension/manual discovery ──► Vercel /api/ingest ──► Supabas
                                                 │               │
                                                 └─ matcher       │
                                                                  │
-GitHub Actions ─► scheduler telemetry ─► due preflight ─► Playwright worker
+AWS EventBridge ─► Lambda ─► GitHub workflow_dispatch ─► scheduler telemetry ─► due preflight ─► Playwright worker
                                                                  │
                                                                  └─ observations/cadence/lifecycle
 
@@ -21,7 +21,7 @@ Core principles:
 - preserve observation history while coalescing rapid same-source complete captures into one capture episode;
 - `next_observation_at` controls due work;
 - separate listing attention from product opportunity and separate unresolved queue work from promoted/dismissed research;
-- structured automotive identity outranks fuzzy text similarity;
+- marketplace-neutral/category-agnostic similarity is the default queue/suppression layer; domain adapters may add stricter identity rules without redefining the core data model;
 - closure is not proof of sale;
 - relists preserve lineage and lifecycle episodes;
 - scheduler health is observable independently of listing-level failures;
@@ -76,3 +76,26 @@ Both persist in `opportunities`, link supporting research through `opportunity_l
 ## View-count trust boundary (V3.9.16)
 
 The collector is the first trust boundary for marketplace counters. Trade Me views must originate from views-specific DOM or labelled accessibility metadata; whole-document numeric fallback is forbidden. Both the manual ingest API and worker database persistence independently quarantine legacy `page-text:*` view provenance, providing a second defensive layer before cadence, velocity, and opportunity intelligence consume the observation.
+
+
+## V3.9.17 interest-decision layer
+
+```text
+new marketplace discovery
+  -> active user-interest exclusions
+  -> generic TF-IDF/category/identifier similarity
+     -> strong negative match: suppression hit only (no recurring observation)
+     -> otherwise: canonical listing -> observation queue
+
+Observation Queue row
+  -> View similar listings (inspection only)
+  -> Not Interested in Tracking -> preserve history + stop schedule + create suppression profile
+  -> Resume tracking -> disable profile + due now
+  -> Delete listing -> destructive record/history removal; creates no preference signal
+```
+
+The generic similarity layer does not contain vehicle makes/models or category-specific exclusions. Product-domain adapters (for example vehicle fitment) may still exist for richer Product CRM matching, but they sit above the marketplace-neutral queue/admission layer.
+
+## Scheduler ownership
+
+V3.9.17 makes AWS EventBridge Scheduler the clock. The repository workflow is `workflow_dispatch` only. Because retryable external scheduling is at-least-once in practice, `worker/dispatch_guard.py` suppresses repeat dispatches within eight minutes before dependency installation. GitHub Actions remains the worker compute environment.

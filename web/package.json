@@ -1,6 +1,6 @@
 {
   "name": "cobalt-web",
-  "version": "3.9.16",
+  "version": "3.9.17",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,7 +8,8 @@
     "start": "next start",
     "test:intelligence": "node scripts/test-intelligence.cjs",
     "test:opportunities": "node scripts/test-opportunities.cjs",
-    "test:all": "npm run test:intelligence && npm run test:opportunities"
+    "test:all": "npm run test:intelligence && npm run test:opportunities && npm run test:similarity",
+    "test:similarity": "node scripts/test-generic-similarity.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

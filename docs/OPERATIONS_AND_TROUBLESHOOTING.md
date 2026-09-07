@@ -262,3 +262,12 @@ Help/info popovers should appear above table scroll frames and sticky headers. O
 ## Repairing a suspicious Trade Me view count (V3.9.16)
 
 From `worker/`, run `python3 recheck_listing.py <TRADE_ME_LISTING_ID> --dry-run` first. The script collects the listing twice and requires a trusted views-specific source with close agreement between captures. Run again without `--dry-run` to set unsafe historical `page-text:*` view values to `NULL` and save a new trusted observation through the normal worker path. Historical bad rows are quarantined rather than replaced with a later count.
+
+
+## V3.9.17 AWS scheduler / duplicate dispatches
+
+The production schedule is AWS EventBridge Scheduler -> Lambda -> GitHub `workflow_dispatch`. GitHub's native cron is intentionally absent. A normal real tick is 10 minutes.
+
+`dispatch_guard.py` executes before pip. If another `workflow_dispatch` scheduler heartbeat began within the previous 8 minutes, the job is treated as a duplicate delivery and skips telemetry, dependency installation, due checking, Chromium and collection. This makes scheduler retries cheap and idempotent while preserving the next genuine 10-minute tick.
+
+If the dashboard reports no scheduler heartbeat for more than one expected interval, check EventBridge schedule state, Lambda CloudWatch logs and GitHub Actions dispatches in that order.

@@ -1,9 +1,8 @@
 name: COBALT observations
 on:
+  # Scheduling is owned by AWS EventBridge Scheduler. AWS invokes the Lambda bridge,
+  # which dispatches this workflow. Keep GitHub as compute/source control, not the clock.
   workflow_dispatch:
-  schedule:
-    - cron: '7,17,27,37,47,57 * * * *'
-      timezone: 'Pacific/Auckland'
 concurrency:
   group: cobalt-observer
   cancel-in-progress: false
@@ -15,8 +14,7 @@ jobs:
       run:
         working-directory: worker
     env:
-      COBALT_VERSION: '3.9.12'
-      MAX_LISTINGS_PER_RUN: '12'
+      MAX_LISTINGS_PER_RUN: '24'
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       COBALT_WEB_URL: 'https://fishing-pond-seven.vercel.app'
@@ -28,12 +26,18 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Ignore duplicate scheduler dispatches
+        id: dispatch_guard
+        run: python dispatch_guard.py
+
       # Standard-library-only heartbeat: runs before pip so bootstrap failures are visible.
       - name: Record scheduler wake
+        if: steps.dispatch_guard.outputs.duplicate != 'true'
         continue-on-error: true
         run: python scheduler_telemetry.py start
 
       - name: Install and verify Python dependencies
+        if: steps.dispatch_guard.outputs.duplicate != 'true'
         id: deps
         shell: bash
         run: |
@@ -64,6 +68,7 @@ jobs:
           python scheduler_telemetry.py dependencies_ok || true
 
       - name: Check whether anything is due
+        if: steps.dispatch_guard.outputs.duplicate != 'true'
         id: due
         shell: bash
         run: |
@@ -88,7 +93,7 @@ jobs:
           fi
 
       - name: Install Chromium
-        if: steps.due.outputs.due == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.dispatch_guard.outputs.duplicate != 'true' && steps.due.outputs.due == 'true'
         shell: bash
         run: |
           set -o pipefail
@@ -98,7 +103,7 @@ jobs:
           fi
 
       - name: Collect due listings
-        if: steps.due.outputs.due == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.dispatch_guard.outputs.duplicate != 'true' && steps.due.outputs.due == 'true'
         shell: bash
         env:
           HEADLESS: 'true'
@@ -110,7 +115,7 @@ jobs:
           fi
 
       - name: Scan cross-listing opportunity signals
-        if: steps.due.outputs.due == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.dispatch_guard.outputs.duplicate != 'true' && steps.due.outputs.due == 'true'
         continue-on-error: true
         working-directory: .
         shell: bash
@@ -131,7 +136,7 @@ jobs:
             echo "- Attempt: $GITHUB_RUN_ATTEMPT"
             echo "- Event: $GITHUB_EVENT_NAME"
             echo "- Commit: $GITHUB_SHA"
-            echo "- COBALT: $COBALT_VERSION"
+            echo "- COBALT: $(python -c 'import json,pathlib; print(json.loads((pathlib.Path.cwd().parent/"web"/"package.json").read_text()).get("version","unknown"))')"
             echo "- Due output: ${{ steps.due.outputs.due }}"
             echo "- Due count: ${{ steps.due.outputs.due_count }}"
           } >> "$GITHUB_STEP_SUMMARY"

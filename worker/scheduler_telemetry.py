@@ -16,7 +16,15 @@ KEY=os.environ.get('SUPABASE_SERVICE_ROLE_KEY','')
 RUN_ID=os.environ.get('GITHUB_RUN_ID') or 'local'
 RUN_ATTEMPT=int(os.environ.get('GITHUB_RUN_ATTEMPT') or 1)
 LOG_PATH=Path(os.environ.get('COBALT_SCHEDULER_LOG','scheduler_debug.jsonl'))
-VERSION=os.environ.get('COBALT_VERSION','3.9.15')
+def repo_version():
+    explicit=os.environ.get('COBALT_VERSION')
+    if explicit: return explicit
+    try:
+        package=Path(__file__).resolve().parents[1]/'web'/'package.json'
+        return str(json.loads(package.read_text(encoding='utf-8')).get('version') or 'unknown')
+    except Exception:
+        return 'unknown'
+VERSION=repo_version()
 
 
 def now(): return datetime.now(timezone.utc).isoformat()

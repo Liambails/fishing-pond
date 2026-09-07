@@ -1,3 +1,17 @@
+## V3.9.17 — Observation Queue Controls + Interest Suppression
+
+- Observation Queue rows now have a sticky right-side action menu. Desktop shows the control on row hover/focus; touch/mobile keeps it visible. The final data column is padded so the sticky control never covers table content.
+- Row actions are **View similar listings**, **Not Interested in Tracking** / **Resume tracking**, and **Delete this listing**. Delete is destructive and separate from preference learning.
+- Added a category-agnostic Similar Listings modal using TF-IDF text similarity, token overlap, category-path overlap and shared model/reference-like identifiers. The matcher contains no vehicle-only admission rules and is regression-tested with both vehicle parts and kitchenware examples.
+- Added durable `interest_suppressions` and `interest_suppression_hits`. Marking a listing Not Interested stops future observations, preserves history, and creates a conservative negative-interest profile. New high-confidence near-duplicates can be rejected before entering the recurring observation queue.
+- Restoring a listing disables the suppression profile and immediately makes the listing due again.
+- Queue-level peer corroboration no longer uses the old vehicle-specific make/model/chassis key. It now uses the same category-agnostic similarity primitives, reducing unrelated cross-product corroboration and preparing COBALT for toys, kitchenware, watches and other verticals.
+- `GOOD` now requires **at least 4 independent evidence windows in all cases**. Peer corroboration can increase context/confidence but can no longer unlock GOOD after only 3 independent observations.
+- AWS EventBridge Scheduler is now the sole scheduler clock in the repo workflow; the unreliable GitHub cron has been removed. The workflow derives its COBALT version from `web/package.json`, skips Chromium/worker work when nothing is due, and can process up to 24 due listings per real tick.
+- Added a pre-dependency dispatch idempotency guard. Recent scheduler data showed repeat `workflow_dispatch` deliveries inside the same 10-minute window; duplicates within 8 minutes now exit before pip/Chromium and do not create extra scheduler heartbeats.
+- Automation Health no longer shows the stale scheduler activity pill; its lead text now states the actionable due-listing condition directly.
+- Migration `016_interest_suppression.sql` is required.
+
 ## V3.9.16 — Trusted View Capture + Text Notification Control
 
 - Removed the whole-document Trade Me view-count fallback that could incorrectly pair the word `views` with an unrelated number such as a seller-member year.

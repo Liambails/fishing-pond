@@ -1,6 +1,6 @@
 # COBALT — algorithms and formulas
 
-This document describes the deterministic calculations in the current V3.9.11 codebase. When thresholds/formulas change, update this file in the same commit.
+This document describes the deterministic calculations in the current V3.9.17 codebase. When thresholds/formulas change, update this file in the same commit.
 
 ## 0. Capture episodes
 
@@ -87,13 +87,21 @@ If neither field exists, the component is omitted and weights renormalize.
 
 ### Relative peer component
 
-Listings are grouped by inferred make/model/chassis/part key for queue-level peer comparison. Recent velocity is compared with the peer median and converted into deterministic score bands. This is separate from the richer Product CRM hybrid-v2 comparable matcher.
+Queue-level peer corroboration is category-agnostic. COBALT builds TF-IDF vectors from listing title, marketplace category path and product-facing metadata, then combines TF-IDF cosine, token overlap, category overlap and shared code-like identifiers. A peer must clear conservative lexical/category gates before its recent velocity contributes to the peer median. This avoids hardcoding vehicles as the universal product model and prevents unrelated products from corroborating each other merely because they share a generic term such as 'switch'.
 
 ### Evidence component
 
 Evidence quality uses **independent evidence-window count**, not raw capture count. Current count scores are 18, 36, 54, 68, 78 and 84 points for 1, 2, 3, 4, 5 and 6+ independent windows respectively. Evidence span adds up to 10 points over 48 hours, freshness adds 8 points within ~30h or 4 within ~54h, and each current collection failure removes 12 points.
 
 Raw captures inside the same <3h window remain visible in history and are reported as close-together captures, but they do not increase confidence. Final listing confidence is capped at 99%.
+
+### GOOD evidence gate
+
+`GOOD` requires at least **4 temporally independent evidence windows** regardless of whether comparable peers corroborate the listing. The evidence must also span at least 20 hours, confidence must be at least 55, attention at least 72, and either peer corroboration or standalone velocity confirmation must be present. Peer corroboration cannot reduce the four-window minimum. `MUST_HAVE` remains stricter.
+
+### User-interest suppression
+
+A user preference is intentionally separate from market demand. `Not Interested in Tracking` does not rewrite a listing's signal. It stops the listing schedule and creates a reusable negative-interest profile. New discoveries are compared against active profiles using the category-agnostic similarity score. Only high-confidence near-duplicates are suppressed; deletion does not create a suppression profile.
 
 ### Queue states
 

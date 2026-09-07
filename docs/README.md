@@ -27,3 +27,8 @@ Current documented release: **V3.9.15** — standalone opportunity signals along
 
 ### V3.9.16 note
 Trade Me view extraction now fails closed: if COBALT cannot locate a trusted views-specific counter it records no view count rather than guessing from page text. Use `worker/recheck_listing.py` for a targeted repair of a suspicious listing. The header opportunity control is text-only (`OPPORTUNITIES [N]`) and visually separated from the NZST clock.
+
+
+### V3.9.17 deployment note
+
+Apply `supabase/migrations/016_interest_suppression.sql` before using **Not Interested in Tracking**. Deploy the web/worker changes after the migration. AWS EventBridge Scheduler is the production clock; do not re-add GitHub's native cron.

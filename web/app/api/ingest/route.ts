@@ -3,6 +3,7 @@ import { detectMarketplace } from '../../../lib/marketplaces';
 import { matchListingIncrementally } from '../../../lib/comparableMatcher';
 import { detectNewIdRelist } from '../../../lib/relistMatcher';
 import { normalizeMarketplaceCloseDate } from '../../../lib/closeDate';
+import {scoreAgainstProfiles} from '../../../lib/interestSuppression';
 
 function asNum(v: unknown) { if (v === null || v === undefined || v === '') return null; const n=Number(v); return Number.isFinite(n)?n:null; }
 function asIso(v: unknown) { if (!v) return null; const d=new Date(String(v)); return Number.isNaN(d.getTime())?null:d.toISOString(); }
@@ -147,6 +148,24 @@ export async function POST(req: Request) {
   }
   const captureComplete=previouslyComplete||quality.complete;
   const metadata={...(existing?.metadata||{}),template:raw.template??existing?.metadata?.template??null,category_path:raw.category_path??existing?.metadata?.category_path??null,primary_image_url:raw.primary_image_url??existing?.metadata?.primary_image_url??null,initial_capture_complete:captureComplete,initial_capture_completed_at:existing?.metadata?.initial_capture_completed_at||(quality.complete?capturedAt:null),initial_capture_score:existing?.metadata?.initial_capture_score??(quality.complete?quality.score:null)};
+  // User interest is an admission decision, not a demand signal. A listing already marked
+  // not-interested stays suppressed, and newly discovered near-duplicates are rejected before
+  // they enter the recurring observation queue. This matcher is category-agnostic.
+  const existingQueueState=String(existing?.metadata?.observation_queue_status||'').toLowerCase();
+  if(existingQueueState==='not_interested')return json({ok:true,suppressed:true,suppression_reason:'user_not_interested',marketplace:identity.marketplace,listing_id:identity.listingId,observation_saved:false});
+  if(!existing){
+    try{
+      const {data:profiles}=await db.from('interest_suppressions').select('*').eq('active',true).eq('scope','similar').order('created_at',{ascending:false}).limit(250);
+      if(profiles?.length){
+        const candidate={title:raw.listing_title||null,metadata};
+        const matches=scoreAgainstProfiles(candidate,raw,profiles);const best=matches[0];
+        if(best?.suppress){
+          await db.from('interest_suppression_hits').insert({suppression_id:best.profile.id,marketplace:identity.marketplace,marketplace_listing_id:identity.listingId,title:raw.listing_title||null,url:identity.canonicalUrl,score:best.match.score,evidence:{matcher_version:best.profile.matcher_version,cosine:best.match.cosine,token_overlap:best.match.tokenOverlap,category:best.match.category,identifier_overlap:best.match.identifierOverlap,reasons:best.match.reasons}});
+          return json({ok:true,suppressed:true,suppression_reason:'user_not_interested_similar',matched_source_listing_uuid:best.profile.source_listing_uuid,similarity:best.match,marketplace:identity.marketplace,listing_id:identity.listingId,observation_saved:false});
+        }
+      }
+    }catch(e){console.warn('[COBALT INTEREST] suppression unavailable; admitting listing',e)}
+  }
   const listingPayload:any={
     marketplace:identity.marketplace,listing_id:identity.listingId,url:identity.canonicalUrl,source_url:raw.source_url||raw.url,
     title:raw.listing_title||existing?.title||null,seller:raw.seller||existing?.seller||null,active:raw.listing_ended?false:true,
