@@ -1,3 +1,12 @@
+## V3.9.16 — Trusted View Capture + Text Notification Control
+
+- Removed the whole-document Trade Me view-count fallback that could incorrectly pair the word `views` with an unrelated number such as a seller-member year.
+- View counts are now accepted only from known views-specific DOM elements, explicitly labelled view text, or trusted accessibility labels. Missing views are stored as missing rather than guessed.
+- Ingest and worker persistence quarantine legacy `page-text:*` view sources instead of allowing them to affect velocity, cadence, or opportunity intelligence.
+- Added `worker/recheck_listing.py` to re-open a specific Trade Me listing, quarantine unsafe historical view rows, and save a fresh trusted observation.
+- Replaced the coloured bell icon with a large text-only `OPPORTUNITIES [N]` control. Unread signals are visually prominent and separated from the NZST timestamp by a dedicated divider.
+- Collector version 1.5.5. No database migration required.
+
 # COBALT — release history
 
 ## V3.9.15 — Standalone Opportunity Signals

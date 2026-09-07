@@ -258,3 +258,7 @@ If a promoted listing appears in Active, first confirm the dashboard received th
 ## Dashboard layering and sticky-header checks
 
 Help/info popovers should appear above table scroll frames and sticky headers. Observation Queue and My Products should both keep their `<thead>` labels visible while scrolling their data frame. If a popover is clipped beneath a table after V3.9.11, verify the current CSS/JS bundle is deployed rather than debugging data or API state.
+
+## Repairing a suspicious Trade Me view count (V3.9.16)
+
+From `worker/`, run `python3 recheck_listing.py <TRADE_ME_LISTING_ID> --dry-run` first. The script collects the listing twice and requires a trusted views-specific source with close agreement between captures. Run again without `--dry-run` to set unsafe historical `page-text:*` view values to `NULL` and save a new trusted observation through the normal worker path. Historical bad rows are quarantined rather than replaced with a later count.

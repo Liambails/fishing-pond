@@ -451,3 +451,9 @@ The standalone marketplace-demand score is bounded to 100 and combines trusted v
 A standalone signal becomes `STRONG` only when evidence is deeper: at least 5 independent windows over 48h, confidence >=72, velocity >=8/day, demand score >=72, and at least one exceptional buying/velocity signal (explicit sold, 2+ bids, buyer-intent >=65, or velocity >=14/day).
 
 Standalone opportunities are not created for listings that are already members of a qualifying corroborated family. The UI explicitly states that reliable comparables are not yet available. The resulting recommendation is therefore higher-uncertainty supplier research, not a claim of established market demand.
+
+## Trusted marketplace view counts (V3.9.16)
+
+Trade Me view counts are accepted only from views-specific DOM elements, explicitly labelled view text inside a views-specific element, or a trusted accessibility/title label. COBALT no longer scans the whole flattened page for a nearby `views` token because unrelated numbers such as years can be mis-associated with that label. If no trusted counter is available, the observation stores `views = null`; missing evidence is preferred to fabricated velocity.
+
+Legacy captures whose provenance starts with `page-text:` are quarantined at ingest/worker persistence and must not be used as trusted view evidence. A repair recheck stores a fresh observation instead of rewriting a historical row with a later view count.

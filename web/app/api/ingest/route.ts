@@ -6,6 +6,16 @@ import { normalizeMarketplaceCloseDate } from '../../../lib/closeDate';
 
 function asNum(v: unknown) { if (v === null || v === undefined || v === '') return null; const n=Number(v); return Number.isFinite(n)?n:null; }
 function asIso(v: unknown) { if (!v) return null; const d=new Date(String(v)); return Number.isNaN(d.getTime())?null:d.toISOString(); }
+function trustedViewSource(raw:any){
+  const source=String(raw?._sources?.views?.source||raw?.raw_sources_json?.views?.source||'');
+  if(!source)return true; // older trusted collectors may not include provenance
+  return !source.startsWith('page-text:');
+}
+function quarantineUnsafeViews(raw:any){
+  if(asNum(raw?.views)==null||trustedViewSource(raw))return raw;
+  const source=String(raw?._sources?.views?.source||raw?.raw_sources_json?.views?.source||'unknown');
+  return {...raw,views:null,extraction_quality:{...(raw?.extraction_quality||{}),warnings:[...new Set([...(raw?.extraction_quality?.warnings||[]),'unsafe_view_source'])]},_view_guard:{quarantined:true,source,reason:'whole-page view fallback is not trusted'}};
+}
 function activity(rows:any[]){
   const a=[...rows].filter(x=>x.captured_at).sort((x,y)=>Date.parse(x.captured_at)-Date.parse(y.captured_at));
   if(!a.length)return {observation_count:0,span_hours:0,views_per_day:null,view_delta:null,bid_delta:null,watcher_delta:null};
@@ -120,7 +130,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   if(!authorized(req))return json({ok:false,error:'Unauthorized'},{status:401});
-  const raw = await req.json();
+  const raw = quarantineUnsafeViews(await req.json());
   if (!raw?.url) return json({ok:false,error:'url is required'}, {status:400});
   let identity;
   try{identity=detectMarketplace(String(raw.url),raw.marketplace,raw.listing_id?String(raw.listing_id):null)}catch{return json({ok:false,error:'Invalid listing URL'},{status:400})}

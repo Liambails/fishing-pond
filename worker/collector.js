@@ -1,7 +1,7 @@
 window.CobaltCollect = async function() {
-  // COBALT Trade Me DOM Collector v1.5.4
+  // COBALT Trade Me DOM Collector v1.5.5
   // Current manually-opened page only. No crawling, navigation, or remote fetches.
-  const VERSION = "1.5.4";
+  const VERSION = "1.5.5";
   const $ = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => [...r.querySelectorAll(s)];
   const clean = v => String(v ?? "").trim().replace(/\s+/g, " ");
@@ -140,11 +140,13 @@ window.CobaltCollect = async function() {
     return null;
   };
   const readViews = () => {
+    // A pure counter is safe only inside a known views-specific DOM element. The old
+    // whole-page fallback was able to pair the word "views" with unrelated numbers
+    // elsewhere in flattened page text (for example a seller-member year such as 2023).
+    const pureCount=(value)=>{const v=clean(value);return /^\d{1,3}(?:,\d{3})*$|^\d+$/.test(v)?Number(v.replace(/,/g,'')):null;};
     const knownSelectors=[
       '.tm-listing-id-views__views',
       '.tm-motors-date-city-watchlist__views-container',
-      '[class*="listing-id-views"]',
-      '[class*="views-container"]',
       '[data-testid*="views" i]',
       '[data-testid*="page-view" i]'
     ];
@@ -152,8 +154,17 @@ window.CobaltCollect = async function() {
       for(const el of $$(selector)){
         const rawText=txt(el);
         const labelled=parseViewsText(rawText);
-        const n=labelled!=null?labelled:num(rawText);
+        const standalone=pureCount(rawText);
+        const n=labelled!=null?labelled:standalone;
         if(n!=null && n>=0)return {value:n,source:`selector:${selector}`};
+      }
+    }
+    // Broader class-name matches are accepted only when their own text explicitly labels
+    // the number as views. We never extract an arbitrary first number from these elements.
+    for(const selector of ['[class*="listing-id-views"]','[class*="views-container"]']){
+      for(const el of $$(selector)){
+        const n=parseViewsText(txt(el));
+        if(n!=null && n>=0)return {value:n,source:`selector-labelled:${selector}`};
       }
     }
     // Some templates expose the label through accessibility/title attributes.
@@ -161,8 +172,8 @@ window.CobaltCollect = async function() {
       const label=clean(el.getAttribute('aria-label')||el.getAttribute('title'));
       const n=parseViewsText(label); if(n!=null)return {value:n,source:'attribute:view-label'};
     }
-    const bodyValue=parseViewsText(txt(document.body));
-    return bodyValue!=null?{value:bodyValue,source:'page-text:view-label'}:{value:null,source:null};
+    // Deliberately no document.body fallback. Missing is safer than a fabricated counter.
+    return {value:null,source:null};
   };
   const viewRead=readViews();
   let views=viewRead.value;

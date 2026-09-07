@@ -24,3 +24,6 @@ Opportunity Signals are documented across `SYSTEM_OVERVIEW.md`, `ARCHITECTURE.md
 
 
 Current documented release: **V3.9.15** — standalone opportunity signals alongside corroborated product-family opportunities, with marketplace behavioural intent, public Q&A intelligence and persistent Trade Me listing drafts.
+
+### V3.9.16 note
+Trade Me view extraction now fails closed: if COBALT cannot locate a trusted views-specific counter it records no view count rather than guessing from page text. Use `worker/recheck_listing.py` for a targeted repair of a suspicious listing. The header opportunity control is text-only (`OPPORTUNITIES [N]`) and visually separated from the NZST clock.

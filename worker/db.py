@@ -147,8 +147,23 @@ def _recent_observations(db, listing_uuid, limit=12, episode=None):
     return q.order('captured_at',desc=True).limit(limit).execute().data or []
 
 
+def _quarantine_unsafe_views(raw):
+    raw = dict(raw or {})
+    source = str((((raw.get('_sources') or {}).get('views') or {}).get('source') or ''))
+    if raw.get('views') is not None and source.startswith('page-text:'):
+        raw['_view_guard'] = {'quarantined': True, 'source': source, 'reason': 'whole-page view fallback is not trusted'}
+        raw['views'] = None
+        q = dict(raw.get('extraction_quality') or {})
+        warnings = list(q.get('warnings') or [])
+        if 'unsafe_view_source' not in warnings: warnings.append('unsafe_view_source')
+        q['warnings'] = warnings
+        raw['extraction_quality'] = q
+    return raw
+
+
 def save_success(listing, raw):
     db = client()
+    raw = _quarantine_unsafe_views(raw)
     # Persist provenance with every automatic observation so dashboard diagnostics
     # can distinguish GitHub-worker captures from manual Chrome-extension captures.
     raw = dict(raw or {})

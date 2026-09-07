@@ -72,3 +72,7 @@ The Opportunity engine has two active evidence classes:
 - `standalone` — one listing with unusually strong, sustained independent evidence when no reliable comparable cluster exists.
 
 Both persist in `opportunities`, link supporting research through `opportunity_listings`, and emit durable `opportunity_notifications`. `opportunity_type` is first-class schema state so UI and future scoring can apply different confidence semantics without overloading listing metadata.
+
+## View-count trust boundary (V3.9.16)
+
+The collector is the first trust boundary for marketplace counters. Trade Me views must originate from views-specific DOM or labelled accessibility metadata; whole-document numeric fallback is forbidden. Both the manual ingest API and worker database persistence independently quarantine legacy `page-text:*` view provenance, providing a second defensive layer before cadence, velocity, and opportunity intelligence consume the observation.
