@@ -1,7 +1,7 @@
 window.CobaltCollect = async function() {
-  // COBALT Trade Me DOM Collector v1.5.2
+  // COBALT Trade Me DOM Collector v1.5.4
   // Current manually-opened page only. No crawling, navigation, or remote fetches.
-  const VERSION = "1.5.2";
+  const VERSION = "1.5.4";
   const $ = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => [...r.querySelectorAll(s)];
   const clean = v => String(v ?? "").trim().replace(/\s+/g, " ");
@@ -125,13 +125,99 @@ window.CobaltCollect = async function() {
   if(!loc&&addr)loc=[addr.addressLocality,addr.addressRegion].filter(Boolean).join(', ');
   put('location',loc,loc?'dom/jsonld':null,.96);
 
-  let views=null; const viewText=txt($('.tm-listing-id-views__views'))||txt($('.tm-motors-date-city-watchlist__views-container'));
-  if(viewText)views=num(viewText); if(views==null){const m=pageText.match(/Page views:\s*([\d,]+)|·\s*([\d,]+)\s+views/i); if(m)views=Number((m[1]||m[2]).replace(/,/g,''));}
-  put('views',views,viewText?'views-dom':views!=null?'page-text':null,.98);
+  // Views: Trade Me renders this field asynchronously and uses more than one template.
+  // Prefer known semantic containers, then conservative label/text fallbacks. Never infer a
+  // view count from an arbitrary number unless the same string explicitly says "view(s)".
+  const parseViewsText = (value) => {
+    const v=clean(value); if(!v)return null;
+    const patterns=[
+      /Page\s+views?\s*:?\s*([\d,]+)/i,
+      /Views?\s*:?\s*([\d,]+)/i,
+      /([\d,]+)\s+(?:page\s+)?views?\b/i,
+      /·\s*([\d,]+)\s+views?\b/i,
+    ];
+    for(const rx of patterns){const m=v.match(rx);if(m)return Number(m[1].replace(/,/g,''));}
+    return null;
+  };
+  const readViews = () => {
+    const knownSelectors=[
+      '.tm-listing-id-views__views',
+      '.tm-motors-date-city-watchlist__views-container',
+      '[class*="listing-id-views"]',
+      '[class*="views-container"]',
+      '[data-testid*="views" i]',
+      '[data-testid*="page-view" i]'
+    ];
+    for(const selector of knownSelectors){
+      for(const el of $$(selector)){
+        const rawText=txt(el);
+        const labelled=parseViewsText(rawText);
+        const n=labelled!=null?labelled:num(rawText);
+        if(n!=null && n>=0)return {value:n,source:`selector:${selector}`};
+      }
+    }
+    // Some templates expose the label through accessibility/title attributes.
+    for(const el of $$('[aria-label],[title]')){
+      const label=clean(el.getAttribute('aria-label')||el.getAttribute('title'));
+      const n=parseViewsText(label); if(n!=null)return {value:n,source:'attribute:view-label'};
+    }
+    const bodyValue=parseViewsText(txt(document.body));
+    return bodyValue!=null?{value:bodyValue,source:'page-text:view-label'}:{value:null,source:null};
+  };
+  const viewRead=readViews();
+  let views=viewRead.value;
+  put('views',views,viewRead.source,views!=null?.98:0);
   let watchers=null; let wm=pageText.match(/([\d,]+)\s+(?:people\s+)?watching\b|Watchers?:\s*([\d,]+)/i); if(wm)watchers=Number((wm[1]||wm[2]).replace(/,/g,''));
   put('watchers',watchers,watchers!=null?'page-text':null,.82);
   let bids=null; if(/\bNo bids\b/i.test(priceArea))bids=0; else {let bm=priceArea.match(/([\d,]+)\s+bids?\b|Bids?:\s*([\d,]+)/i);if(bm)bids=Number((bm[1]||bm[2]).replace(/,/g,''));}
   put('bids',bids,bids!=null?'pricing-text':null,.9);
+
+  // Additional marketplace intent signals. Only record values Trade Me exposes on the
+  // listing page; never infer private offer counts or sales from views.
+  const buyNowAvailable=buyNow!=null||/\bBuy Now\b/i.test(priceArea);
+  const offerAvailable=/\b(?:Make|Place|Submit) an? offer\b|\bMake offer\b/i.test(pageText);
+  put('buy_now_available',buyNowAvailable,'pricing-dom/text',.92);
+  put('offer_available',offerAvailable,'page-text:offer-action',.86);
+  let stockQuantity=null;
+  const stockMatch=pageText.match(/(?:Quantity available|In stock|Stock)\s*:?\s*([\d,]+)/i);
+  if(stockMatch)stockQuantity=Number(stockMatch[1].replace(/,/g,''));
+  put('stock_quantity',stockQuantity,stockQuantity!=null?'page-text:stock-label':null,.82);
+
+  // Public Q&A is valuable because questions encode buying intent, compatibility checks,
+  // condition concerns and identifiers that may not appear in the seller description.
+  const qa=[];
+  for(const node of $$('tm-listing-member-question')){
+    const comments=$$('tg-comment',node);
+    if(!comments.length)continue;
+    const readComment=(el)=>({
+      text:txt($('tg-comment-text, .o-comment__text',el))||null,
+      member:txt($('.tm-member-reputation__display-name',el))||null,
+      note:txt($('tg-comment-note, .o-comment__note',el))||null
+    });
+    const question=readComment(comments[0]);
+    const answer=comments[1]?readComment(comments[1]):null;
+    if(question.text)qa.push({question,answer});
+  }
+  const qText=qa.map(x=>x.question?.text||'').join(' ');
+  const purchaseIntentRx=/\b(?:offer|reserve|buy|buy now|take \$?|would you take|pick ?up (?:today|tonight|tomorrow)|can i collect|best price|lowest price|cash)\b/i;
+  const compatibilityRx=/\b(?:fit|fits|compatible|part number|oem|model|chassis|engine|year|connector|pin|left|right|lh|rh)\b/i;
+  const conditionRx=/\b(?:condition|work|working|fault|issue|problem|damage|damaged|crack|cracked|rust|leak|broken|repair|replace|replaced|missing|wear|worn)\b/i;
+  const purchaseIntentQuestions=qa.filter(x=>purchaseIntentRx.test(x.question?.text||'')).length;
+  const compatibilityQuestions=qa.filter(x=>compatibilityRx.test(x.question?.text||'')).length;
+  const conditionQuestions=qa.filter(x=>conditionRx.test(x.question?.text||'')).length;
+  const qaCodes=[...new Set((qText.toUpperCase().match(/\b[A-Z]{1,5}[-_]?[A-Z0-9]{2,12}(?:[-_/][A-Z0-9]{2,12})*\b/g)||[]).filter(x=>/\d/.test(x)&&x.length>=4&&x.length<=40))].slice(0,20);
+  put('question_count',qa.length,qa.length?'selector:tm-listing-member-question':null,.99);
+  put('q_and_a',qa,qa.length?'selector:tm-listing-member-question':null,.99);
+  put('purchase_intent_questions',purchaseIntentQuestions,qa.length?'derived:q-and-a':null,.86);
+  put('compatibility_questions',compatibilityQuestions,qa.length?'derived:q-and-a':null,.86);
+  put('condition_questions',conditionQuestions,qa.length?'derived:q-and-a':null,.86);
+  put('qa_identity_codes',qaCodes,qaCodes.length?'derived:q-and-a:identifier-pattern':null,.78);
+
+  // Explicit conversion/status evidence only. A closed listing is not automatically sold.
+  const soldDetected=/\b(?:this (?:item|listing|auction) (?:has )?sold|item has sold|auction (?:has been )?won|sold for \$[\d,]+|winning bid)\b/i.test(pageText);
+  const listingStatus=soldDetected?'sold':listingEnded?'ended':'active';
+  put('sold_detected',soldDetected,soldDetected?'page-text:explicit-sold':null,.94);
+  put('listing_status',listingStatus,'derived:explicit-page-state',.94);
 
   // Seller: exact semantic children, never whole-block prefix parsing unless final fallback.
   const member=$('tm-member-summary, .member-summary-box');

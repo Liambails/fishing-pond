@@ -10,7 +10,7 @@ export async function POST(req:Request){
   const {data:links}=await db.from('product_listings').select('listing_uuid,role,match_score,match_method,match_reason').eq('product_id',productId);
   const ids=(links||[]).map((x:any)=>x.listing_uuid);
   const {data:listings}=ids.length?await db.from('listings').select('*').in('id',ids):{data:[] as any[]};
-  const {data:obs}=ids.length?await db.from('observations').select('listing_uuid,captured_at,views,watchers,bids,buy_now_nzd,asking_price_nzd,current_bid_nzd,close_date,close_remaining').in('listing_uuid',ids).order('captured_at',{ascending:false}).limit(1000):{data:[] as any[]};
+  const {data:obs}=ids.length?await db.from('observations').select('listing_uuid,captured_at,views,watchers,bids,buy_now_nzd,asking_price_nzd,current_bid_nzd,close_date,close_remaining,question_count,purchase_intent_questions,compatibility_questions,condition_questions,buy_now_available,offer_available,stock_quantity,listing_status,sold_detected,qa_identity_codes').in('listing_uuid',ids).order('captured_at',{ascending:false}).limit(1000):{data:[] as any[]};
   const ls=(listings||[]).map((l:any)=>({...l,observations:(obs||[]).filter((o:any)=>o.listing_uuid===l.id).slice(0,30)}));
   const roleById=new Map((links||[]).map((x:any)=>[x.listing_uuid,x.role]));
   const competitors=ls.filter((l:any)=>roleById.get(l.id)!=='own').map((l:any)=>({...l,comparableMatch:(links||[]).find((x:any)=>x.listing_uuid===l.id)||null}));

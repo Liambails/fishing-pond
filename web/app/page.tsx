@@ -12,15 +12,19 @@ function observationSpanHours(listing:any){
 
 export default async function Page(){
  const db=adminClient();
- const [{data:products},{data:listings},{data:obs},{data:errors},{data:events},{data:links},{data:ownListings},{data:matchCandidates}]=await Promise.all([
+ const [{data:products},{data:listings},{data:obs},{data:errors},{data:events},{data:links},{data:ownListings},{data:matchCandidates},{data:opportunities},{data:opportunityNotifications},{data:opportunityLinks},{data:listingDrafts}]=await Promise.all([
   db.from('products').select('*').is('archived_at',null).order('priority',{ascending:false}).limit(100),
   db.from('listings').select('*').order('next_observation_at',{ascending:true}).limit(250),
-  db.from('observations').select('listing_uuid,captured_at,views,watchers,bids,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,close_date,close_remaining').order('captured_at',{ascending:false}).limit(5000),
+  db.from('observations').select('listing_uuid,captured_at,views,watchers,bids,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,close_date,close_remaining,question_count,purchase_intent_questions,compatibility_questions,condition_questions,buy_now_available,offer_available,stock_quantity,listing_status,sold_detected,qa_identity_codes').order('captured_at',{ascending:false}).limit(5000),
   db.from('collection_errors').select('*').order('occurred_at',{ascending:false}).limit(150),
   db.from('system_events').select('*').order('occurred_at',{ascending:false}).limit(150),
   db.from('product_listings').select('*'),
   db.from('own_listings').select('*').eq('active',true),
-  db.from('product_match_candidates').select('*').in('status',['review','accepted','auto_linked'])
+  db.from('product_match_candidates').select('*').in('status',['review','accepted','auto_linked']),
+  db.from('opportunities').select('*').order('last_detected_at',{ascending:false}).limit(100),
+  db.from('opportunity_notifications').select('*').order('created_at',{ascending:false}).limit(200),
+  db.from('opportunity_listings').select('*'),
+  db.from('product_listing_drafts').select('*')
  ]);
  const baseLs=(listings||[]).map((l:any)=>({...l,observations:(obs||[]).filter((o:any)=>o.listing_uuid===l.id).slice(0,40)}));
  const signals=computeListingSignals(baseLs);
@@ -57,11 +61,12 @@ export default async function Page(){
   const name=p.display_name||sourceListing?.title||[p.vehicle_make,p.vehicle_model,p.chassis,p.part_type].filter(Boolean).join(' ')||p.part_type||p.slug||'Untitled product';
   return {
     ...p,
-    name,sourceListing,listings:competitorListings,reviewMatches:(matchCandidates||[]).filter((m:any)=>m.product_id===p.id&&m.status==='review').map((m:any)=>({...m,listing:ls.find((l:any)=>l.id===m.listing_uuid)})).filter((m:any)=>m.listing),ownListings:own,ownCanonicalListings,ownPrimary,
+    name,sourceListing,listingDraft:(listingDrafts||[]).find((d:any)=>d.product_id===p.id&&d.marketplace==='Trade Me')||null,listings:competitorListings,reviewMatches:(matchCandidates||[]).filter((m:any)=>m.product_id===p.id&&m.status==='review').map((m:any)=>({...m,listing:ls.find((l:any)=>l.id===m.listing_uuid)})).filter((m:any)=>m.listing),ownListings:own,ownCanonicalListings,ownPrimary,
     ownObservationCount:ownObsCount,ownObservationSpanHours:ownSpanHours,readyForScoring,peerMedianVelocity,performanceRatio,
     metrics:{...marketMetrics,verdict,score:performanceScore,confidence}
   };
  });
  const enrichedErrors=(errors||[]).map((e:any)=>{const l=ls.find((x:any)=>x.id===e.listing_uuid)||ls.find((x:any)=>String(x.listing_id)===String(e.listing_id));return {...e,marketplace:l?.marketplace||null,listing_title:l?.title||null,consecutive_failures:l?.consecutive_failures||0,next_observation_at:l?.next_observation_at||null,cadence_reason:l?.cadence_reason||null};});
- return <Dashboard products={ps} listings={ls} interventions={enrichedErrors} systemEvents={events||[]} aiEnabled={Boolean(process.env.OPENAI_API_KEY)}/>;
+ const opps=(opportunities||[]).map((o:any)=>({...o,listings:(opportunityLinks||[]).filter((x:any)=>x.opportunity_id===o.id).map((x:any)=>({...x,listing:ls.find((l:any)=>l.id===x.listing_uuid)})).filter((x:any)=>x.listing)}));
+ return <Dashboard products={ps} listings={ls} interventions={enrichedErrors} systemEvents={events||[]} opportunities={opps} opportunityNotifications={opportunityNotifications||[]} aiEnabled={Boolean(process.env.OPENAI_API_KEY)}/>;
 }

@@ -9,6 +9,9 @@ export type Obs = {
   starting_price_nzd?:number|null;
   close_date?:string|null;
   close_remaining?:string|null;
+  question_count?:number|null; purchase_intent_questions?:number|null; compatibility_questions?:number|null; condition_questions?:number|null;
+  buy_now_available?:boolean|null; offer_available?:boolean|null; stock_quantity?:number|null; listing_status?:string|null; sold_detected?:boolean|null;
+  q_and_a?:any; qa_identity_codes?:any;
 };
 
 export type Listing = {
@@ -35,6 +38,24 @@ const DAY=86400000;
 const HOUR=3600000;
 const MIN_INDEPENDENT_GAP_HOURS=3;
 const FULL_VELOCITY_TRUST_HOURS=12;
+function behaviouralIntentScore(o?:Obs|null){
+  if(!o)return null;
+  const has=[o.watchers,o.bids,o.question_count,o.purchase_intent_questions,o.sold_detected].some(v=>v!==null&&v!==undefined);
+  if(!has)return null;
+  const watchers=Math.min(32,Math.max(0,Number(o.watchers||0))*5.5);
+  const bids=Math.min(42,Math.max(0,Number(o.bids||0))*14);
+  const purchaseQs=Math.min(30,Math.max(0,Number(o.purchase_intent_questions||0))*10);
+  const otherQs=Math.min(14,Math.max(0,Number(o.question_count||0)-Number(o.purchase_intent_questions||0))*3.5);
+  const sold=o.sold_detected?100:0;
+  return clamp(sold?Math.max(88,watchers+bids+purchaseQs+otherQs):watchers+bids+purchaseQs+otherQs);
+}
+function qaSummary(o?:Obs|null){
+  const total=Math.max(0,Number(o?.question_count||0));
+  const purchase=Math.max(0,Number(o?.purchase_intent_questions||0));
+  const compatibility=Math.max(0,Number(o?.compatibility_questions||0));
+  const condition=Math.max(0,Number(o?.condition_questions||0));
+  return {total,purchase,compatibility,condition,identityCodes:Array.isArray(o?.qa_identity_codes)?o!.qa_identity_codes:[]};
+}
 export function priceOf(o:Obs){ return o.buy_now_nzd ?? o.asking_price_nzd ?? o.current_bid_nzd ?? null; }
 
 function chronological(obs:Obs[]=[]){
@@ -155,12 +176,7 @@ function evidenceScore(listing:Listing,obs:Obs[]){
   return clamp(countScore+spanScore+freshnessBonus-failures*12);
 }
 function engagementScore(latest?:Obs){
-  if(!latest)return null;
-  const hasWatchers=latest.watchers!=null;
-  const hasBids=latest.bids!=null;
-  if(!hasWatchers&&!hasBids)return null;
-  const watchers=Number(latest.watchers||0), bids=Number(latest.bids||0);
-  return clamp(watchers*10+bids*22);
+  return behaviouralIntentScore(latest||null);
 }
 
 function inferPart(title=''){
@@ -207,7 +223,8 @@ function baseSignal(listing:Listing){
   const close=validCloseDate(latest);
   const views24h=viewsLast24Hours(obs);
   const evidenceDetailsValue=evidenceDetails(listing,obs);
-  return {obs,latest,views,watchers,bids,currentBid,startingPrice,velocity,priorVelocity,overallVelocity,price,observationCount,independentObservationCount,velocityIntervalHours:recentInfo?.hours??null,velocityTrust:recentInfo?.trust??null,rawRecentVelocity:recentInfo?.rawVelocity??null,evidence,engagement,close,views24h,evidenceDetails:evidenceDetailsValue};
+  const qas=qaSummary(latest);
+  return {obs,latest,views,watchers,bids,currentBid,startingPrice,velocity,priorVelocity,overallVelocity,price,observationCount,independentObservationCount,velocityIntervalHours:recentInfo?.hours??null,velocityTrust:recentInfo?.trust??null,rawRecentVelocity:recentInfo?.rawVelocity??null,evidence,engagement,close,views24h,evidenceDetails:evidenceDetailsValue,qas,soldDetected:Boolean(latest?.sold_detected)};
 }
 
 export function computeListingSignals(listings:Listing[]){
@@ -284,6 +301,8 @@ export function computeListingSignals(listings:Listing[]){
     if(b.close&&b.close.hoursToClose>=0&&b.close.hoursToClose<=72&&b.velocity!=null&&b.velocity>0) whyParts.push(`still attracting views with ${Math.round(b.close.hoursToClose)}h left`);
     if((b.bids||0)>0) whyParts.push(`${b.bids} bid${b.bids===1?'':'s'} recorded${b.currentBid!=null?` · current bid $${b.currentBid}`:''}`);
     else if((b.watchers||0)>0) whyParts.push(`${b.watchers} watcher${b.watchers===1?'':'s'} recorded`);
+    if((b.qas?.purchase||0)>0) whyParts.push(`${b.qas.purchase} purchase-intent question${b.qas.purchase===1?'':'s'} detected in public Q&A`);
+    if(b.soldDetected) whyParts.push('Trade Me page explicitly indicates the item sold');
     if(Number(b.listing.consecutive_failures||0)>0) whyParts.push(`${b.listing.consecutive_failures} recent collection failure${b.listing.consecutive_failures===1?'':'s'} lowers reliability`);
     const e=b.evidenceDetails;
     const confidenceBits=[`${e.count} raw observation${e.count===1?'':'s'}`,`${e.independentCount} independent evidence window${e.independentCount===1?'':'s'}`];
@@ -300,7 +319,7 @@ export function computeListingSignals(listings:Listing[]){
       velocity:b.velocity,overallVelocity:b.overallVelocity,previousVelocity:b.priorVelocity,
       accelerationScore:aScore,closeScore,hoursToClose:b.close?.hoursToClose??null,closeDate:b.close?.closeDate??null,
       relativeVelocity:relativeRatio==null?null:round(relativeRatio,2),peerMedianVelocity:peerMedian==null?null:round(peerMedian,2),peerCount:peerGroup.length,peerPositive,peerPositiveShare:round(peerPositiveShare,2),corroborated,
-      observationCount:b.observationCount,independentObservationCount:b.independentObservationCount,compressedObservationCount:b.evidenceDetails.compressedCount,velocityIntervalHours:b.velocityIntervalHours,velocityTrust:b.velocityTrust,rawRecentVelocity:b.rawRecentVelocity,evidenceScore:round(b.evidence),engagementScore:b.engagement==null?null:round(b.engagement),
+      observationCount:b.observationCount,independentObservationCount:b.independentObservationCount,compressedObservationCount:b.evidenceDetails.compressedCount,velocityIntervalHours:b.velocityIntervalHours,velocityTrust:b.velocityTrust,rawRecentVelocity:b.rawRecentVelocity,evidenceScore:round(b.evidence),engagementScore:b.engagement==null?null:round(b.engagement),questionCount:b.qas?.total||0,purchaseIntentQuestions:b.qas?.purchase||0,compatibilityQuestions:b.qas?.compatibility||0,conditionQuestions:b.qas?.condition||0,qaIdentityCodes:b.qas?.identityCodes||[],soldDetected:b.soldDetected,
       reason:plainReason,confidenceReason,
       components:Object.fromEntries(usable.map(([name,,score])=>[name,round(score)]))
     };
@@ -341,6 +360,7 @@ function weightedQuantile(rows:{value:number,weight:number}[],q:number){
 export function computeProductMetrics(product:any, listings:Listing[]){
   const active=listings.filter(x=>x.active);
   const latestByListing=active.map(l=>({listing:l,obs:chronological(l.observations||[]).at(-1)})).filter(x=>Boolean(x.obs)) as {listing:any,obs:Obs}[];
+  const soldHistory=listings.filter(x=>!x.active).map(l=>({listing:l,obs:chronological(l.observations||[]).at(-1)})).filter((x:any)=>Boolean(x.obs?.sold_detected)) as {listing:any,obs:Obs}[];
   const prices=latestByListing.map(x=>priceOf(x.obs)).filter((x):x is number=>typeof x==='number');
   const weightedPrices=latestByListing.map(x=>({value:priceOf(x.obs),weight:comparablePriceWeight(x.listing),score:Number(x.listing?.comparableMatch?.match_score)})).filter((x):x is {value:number,weight:number,score:number}=>typeof x.value==='number');
   const views=latestByListing.map(x=>x.obs.views).filter((x):x is number=>typeof x==='number');
@@ -351,8 +371,12 @@ export function computeProductMetrics(product:any, listings:Listing[]){
   const weightedLow=weightedQuantile(weightedPrices,.20);
   const weightedHigh=weightedQuantile(weightedPrices,.80);
   const medViews=median(views); const avgVelocity=velocities.length?velocities.reduce((a,b)=>a+b,0)/velocities.length:null;
+  const intentEvidence=[...latestByListing,...soldHistory];
+  const intentScores=intentEvidence.map(x=>behaviouralIntentScore(x.obs)).filter((x):x is number=>typeof x==='number');
+  const buyerIntent=median(intentScores); const soldConfirmations=soldHistory.length+latestByListing.filter(x=>x.obs.sold_detected).length;
+  const purchaseIntentQuestions=intentEvidence.reduce((n,x)=>n+Number(x.obs.purchase_intent_questions||0),0);
   const evidence=Math.min(100, active.length*8 + Math.min(30,latestByListing.length*3) + Math.min(20,velocities.length*5));
-  const demand=clamp(35 + Math.min(35,(avgVelocity||0)*8) + Math.min(20,(medViews||0)*.7) + Math.min(10,active.length));
+  const demand=clamp(28 + Math.min(32,(avgVelocity||0)*7) + Math.min(14,(medViews||0)*.5) + Math.min(8,active.length) + Math.min(12,(buyerIntent||0)*.12) + Math.min(6,purchaseIntentQuestions*1.5) + Math.min(12,soldConfirmations*6));
   const competition=clamp(72 - Math.max(0,active.length-5)*4 + Math.min(18,sellers.size*3));
   const landed=Number(product.landed_cost_nzd ?? product.target_landed_cost_nzd ?? 0);
   const pricingAnchor=weightedMarketPrice ?? medPrice;
@@ -371,7 +395,7 @@ export function computeProductMetrics(product:any, listings:Listing[]){
     medianPrice:medPrice,weightedMarketPrice:weightedMarketPrice==null?null:round(weightedMarketPrice,2),
     weightedPriceRange:weightedLow==null||weightedHigh==null?null:{min:round(weightedLow,2),max:round(weightedHigh,2)},
     pricingMethod:'similarity-weighted robust market',pricedComparableCount,similarityScoredPriceCount,
-    medianViews:medViews,avgViewVelocity:avgVelocity==null?null:round(avgVelocity,2),
+    medianViews:medViews,avgViewVelocity:avgVelocity==null?null:round(avgVelocity,2),buyerIntentScore:buyerIntent==null?null:round(buyerIntent),purchaseIntentQuestions,soldConfirmations,
     demand:round(demand),competition:round(competition),margin:round(margin),confidence:round(evidence),fitment:round(fitment),supplier:round(supplier),risk:round(risk),score:round(score),verdict,
     suggestedPrice:suggested,priceFloor:floor,priceRange:prices.length?{min:Math.min(...prices),max:Math.max(...prices)}:null
   };

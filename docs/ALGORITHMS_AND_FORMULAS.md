@@ -342,3 +342,112 @@ Views are deliberately **not** identity proof because counters can reset between
 - Repeated relists by one seller must not inflate independent seller count.
 - Product pricing must use accepted comparables only.
 - Structured automotive identity outranks fuzzy text and price similarity.
+
+## Cross-listing opportunity detection (V3.9.12)
+
+Opportunity detection deliberately requires corroboration across listings. A listing is eligible for clustering only when it has at least two independent observation windows and positive trusted view velocity. A family is surfaced only when at least three comparable listings have positive movement and the median trusted velocity is at least 3.5 views/day.
+
+Clustering combines:
+
+- marketplace/category compatibility;
+- normalized title-token overlap;
+- product-type agreement;
+- make/brand and model/family agreement when present;
+- shared model/platform/chassis codes;
+- shared exact part/reference numbers.
+
+Exact part/reference-number matches are weighted more strongly than semantic text. This prevents text similarity alone from declaring two technically incompatible variants identical.
+
+`STRONG` currently requires at least five positive comparable listings, median velocity at least 6/day, and median listing-confidence at least 45. Otherwise a qualifying family is `EMERGING`.
+
+A notification is generated for a new opportunity and for material strengthening, rather than on every scheduler pass. Material strengthening includes a signal-strength change, at least three additional positive listings, or roughly a 50% increase in median velocity. Dismissed opportunities are suppressed from ordinary strengthening notifications.
+
+The signal means repeated marketplace attention, not confirmed sales or guaranteed demand.
+
+
+## V3.9.13 marketplace behavioural-intent score
+
+COBALT keeps passive attention separate from stronger marketplace intent. View velocity is still computed with the temporal guardrails above. The latest observation may additionally contribute a bounded behavioural-intent score when Trade Me exposes the data.
+
+Inputs include:
+
+- watchers — stronger than a passive view because the buyer saved the listing;
+- bids — very strong purchase intent;
+- public Q&A — split into purchase-intent, compatibility and condition questions;
+- explicit sold state — strongest conversion evidence, but only when the page explicitly states the item sold.
+
+The implementation uses saturating contributions rather than raw linear totals so one high-count field cannot dominate the whole score. Current caps are intentionally conservative:
+
+```text
+watchers              up to 32 points
+bids                  up to 42 points
+purchase-intent Q&A   up to 30 points
+other public Q&A      up to 14 points
+explicit sold         raises intent to at least 88/100
+```
+
+The result is a 0–100 `engagementScore`/buyer-intent measure. It is one component of listing attention and product demand; it does not replace independent view evidence.
+
+### Q&A interpretation rules
+
+COBALT does **not** use simple positive/negative sentiment as a sourcing signal. It classifies public questions by commercial function:
+
+```text
+purchase intent       offer, reserve, buy, collect, best/lowest price
+compatibility         fit, model, chassis, year, engine, part number, connector, side
+condition/risk        work, fault, damage, crack, rust, leak, repair, missing, wear
+```
+
+A buyer question is evidence of buyer concern/intent, not proof of a fact. Example: `Any rust?` increases condition-question evidence but does not mark the item as rusty. Seller answers are retained in the Q&A evidence and may be used by the listing-draft AI with cautious attribution.
+
+### Product demand integration
+
+`computeProductMetrics()` now combines trusted view velocity and view depth with the median behavioural-intent score, purchase-intent questions and explicit sold confirmations across accepted comparable listings. The weights are heuristic and deliberately bounded while COBALT accumulates enough outcome data to calibrate them empirically.
+
+### Opportunity integration
+
+Cross-listing opportunities record:
+
+```text
+marketplace_demand_score
+median_buyer_intent_score
+question_count
+purchase_intent_questions
+watchers
+bids
+sold_confirmations
+```
+
+A product family may become `STRONG` through sustained cross-listing view movement or through a combination of corroborated movement and stronger buyer-intent evidence. No opportunity is created from Q&A alone; repeated independent listing evidence remains required.
+
+### Listing draft generation
+
+A Trade Me listing draft is generated once per My Product and persisted. The source snapshot contains accepted research listings, descriptions, structured identity data and public Q&A. AI may rewrite sales copy, but must not invent or silently promote uncertain identity/condition claims. Individual fields can be regenerated independently.
+
+
+## V3.9.15 standalone opportunity detection
+
+Cross-listing corroboration remains the preferred sourcing evidence, but lack of comparables must not make a genuinely unusual product invisible. A listing can therefore create a standalone opportunity when it passes a deliberately harder evidence gate.
+
+Current minimum standalone gate:
+
+```text
+independent evidence windows >= 4
+evidence span               >= 30h
+latest trusted interval     >= 12h
+confidence                  >= 60
+trusted view velocity       >= 6/day
+AND at least one of:
+  explicit sold evidence
+  bids >= 1
+  watchers >= 3
+  purchase-intent Q&A >= 1
+  buyer-intent score >= 55
+  velocity >= 12/day
+```
+
+The standalone marketplace-demand score is bounded to 100 and combines trusted velocity, buyer intent, watchers, bids, purchase-intent Q&A and explicit sold evidence. These are heuristic weights while outcome history is still being accumulated.
+
+A standalone signal becomes `STRONG` only when evidence is deeper: at least 5 independent windows over 48h, confidence >=72, velocity >=8/day, demand score >=72, and at least one exceptional buying/velocity signal (explicit sold, 2+ bids, buyer-intent >=65, or velocity >=14/day).
+
+Standalone opportunities are not created for listings that are already members of a qualifying corroborated family. The UI explicitly states that reliable comparables are not yet available. The resulting recommendation is therefore higher-uncertainty supplier research, not a claim of established market demand.

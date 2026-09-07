@@ -89,7 +89,7 @@ The automated worker uses a normal Playwright Chromium session. It does not rota
 
 ### Canonical listing and observations
 
-A listing is the marketplace identity/URL being tracked. An observation is a timestamped snapshot of that listing. Repeated observations are append-only evidence: price, views, bids/watchers where exposed, close timing, seller data, fitment/part evidence, and collector metadata.
+A listing is the marketplace identity/URL being tracked. An observation is a timestamped snapshot of that listing. Repeated observations are append-only evidence: price, views, bids/watchers where exposed, public Q&A and classified buyer-intent counts, Buy Now/offer availability, explicit sold/listing status, close timing, seller data, fitment/part evidence, and collector metadata.
 
 `next_observation_at` is the scheduling source of truth. A GitHub scheduler wake does **not** imply every listing is opened.
 
@@ -169,9 +169,9 @@ Accepted comparable match confidence is then used to weight market pricing. See 
 
 These are deliberately separate concepts.
 
-**Listing signal** asks whether an individual listing is receiving unusual recent attention. It uses recent trusted view velocity, acceleration, close-stage context, watchers/bids when available, peer-relative velocity, and evidence quality. Rapid observations do not become independent evidence merely because they are separate raw captures.
+**Listing signal** asks whether an individual listing is receiving unusual recent attention. It uses recent trusted view velocity, acceleration, close-stage context, watchers/bids/public Q&A buyer intent when available, peer-relative velocity, and evidence quality. Rapid observations do not become independent evidence merely because they are separate raw captures.
 
-**Observation Queue** is the human decision inbox over that research. It defaults to unresolved `active` listings and orders them by **Most promising**, heavily prioritizing signal class and then confidence, trusted velocity, independent evidence depth, and recent view growth. Operators can alternatively order by Velocity, Confidence, or Newest and filter by Active, Promoted, Dismissed, or All.
+**Observation Queue** is the human decision inbox over that research. It defaults to unresolved `active` listings and orders them by **Most promising**, heavily prioritizing signal class and then confidence, trusted velocity, independent evidence depth, and recent view growth. Operators can alternatively order by Velocity, Confidence, or Newest and filter by Active, In 'My Products', Dismissed, or All. The persisted internal state value remains `promoted` for backward compatibility.
 
 Creating (or automatically promoting) a Product changes the source listing to `promoted`, records `product_id`, and removes it from the default Active queue without deleting its listing/observation evidence. Manual dismissal similarly removes a candidate from Active while preserving its history; it can later be restored. Queue status and decision time are stored in existing listing metadata, so V3.9.11 requires no migration.
 
@@ -204,6 +204,8 @@ Migrations are applied in numeric order. Current sequence:
 - `010_scheduler_forensics.sql` — durable scheduler telemetry.
 - `011_listing_lifecycle_and_match_trace.sql` — relist lifecycle + matcher trace.
 - `012_structured_comparable_identity.sql` — structured identity + durable manual overrides.
+- `013_opportunity_signals.sql` — durable product-family opportunities and bell notifications.
+- `014_marketplace_signal_intelligence.sql` — public Q&A/behavioural observation fields and persistent product listing drafts.
 
 Do not assume a deployment is healthy merely because application code deployed: schema and application versions must be compatible.
 
@@ -245,3 +247,28 @@ Automation Health intentionally exposes two different timestamps: the last succe
 ### Close-date normalization
 
 Collectors attempt to capture `close_date` on every observation, including the first manual capture. V3.9.11 normalizes Trade Me human NZ-local close strings during API ingestion using `Pacific/Auckland`; automatic worker captures already perform equivalent normalization in Python. Missing close dates now mean the marketplace did not expose a recognized close value on that capture, rather than an intentional second-observation rule.
+
+## Opportunity inbox
+
+COBALT now has two related research layers:
+
+1. **Observation Queue** — individual marketplace listings and their evidence/state.
+2. **Opportunity Signals** — either recurring patterns across comparable product families or unusually strong standalone evidence when no reliable comparable family exists yet.
+
+The header bell is a durable inbox. If COBALT is unattended for several days, newly detected and materially strengthened corroborated or standalone product signals accumulate there newest-first. Opening a notification shows aggregate evidence, common identity anchors, supporting listings, recommendation and sourcing actions.
+
+`Keep watching`, `Find supplier`, and `Dismiss` affect the opportunity only. They do not downgrade a `GOOD` listing, stop collection, or delete research history.
+
+
+## Marketplace Q&A and listing-draft intelligence
+
+V3.9.13 treats public marketplace language as structured evidence rather than generic sentiment. The collectors store public question/answer pairs plus conservative counts for purchase-intent, compatibility and condition questions. Code-like identifiers found in Q&A may support identity clustering, but buyer questions never become confirmed facts automatically.
+
+The same evidence can feed My Product `Listing details`. COBALT persists one Trade Me draft per product containing title, description, condition wording, item specifics and an identity/evidence summary. The draft is generated once; each field can be regenerated independently. Competitor wording is reference evidence only and must not be copied.
+
+
+### Standalone opportunity path (V3.9.15)
+
+If a listing has no trustworthy comparable cluster, COBALT does not automatically discard it. Once it has enough independent temporal evidence and unusually strong marketplace behaviour, it can enter the same opportunity inbox as a **Standalone Product Signal**.
+
+The modal clearly distinguishes this evidence class from corroborated signals, shows the independent evidence-window count, trusted velocity, buyer-intent evidence and evidence span, and warns that the sourcing recommendation carries higher market uncertainty. `Find supplier`, `Keep watching` and `Dismiss` behave exactly as they do for corroborated opportunities and never alter the underlying listing signal or observation schedule.

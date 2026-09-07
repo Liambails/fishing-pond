@@ -39,3 +39,36 @@ active observation candidate
 ```
 
 Queue lifecycle is stored in existing `listings.metadata` JSONB. Product creation also sets `listings.product_id`, so promoted research remains traceable from the Product CRM without cluttering the default active queue.
+
+## Opportunity signal layer (V3.9.12)
+
+The opportunity layer sits between listing-level research and commercial Products:
+
+`listings + observations -> listing signals -> product-family clustering -> opportunities -> supplier research -> My Products`
+
+The Observation Queue remains listing-level evidence. Opportunity status never overwrites a listing's deterministic signal label (`TOO EARLY`, `LOW SIGNAL`, `WATCHING`, `GOOD`, `MUST_HAVE`) or its observation schedule.
+
+### Durable opportunity tables
+
+- `opportunities`: canonical cross-listing product-family signal, identity summary, aggregate metrics, lifecycle and supplier-research snapshot.
+- `opportunity_listings`: provenance linking each opportunity to supporting canonical listings and the evidence at the time of the scan.
+- `opportunity_notifications`: durable bell-inbox history. This is business intelligence, not `system_events` health telemetry.
+
+### Automatic detection
+
+The GitHub observation workflow calls `/api/opportunities/scan` after a collection run. The route is protected by the existing COBALT ingest token. This allows opportunity detection to continue while no user has the dashboard open.
+
+
+## V3.9.13 signal enrichment
+
+Trade Me collectors normalize public behavioural data and Q&A into observation fields. Deterministic scoring converts those fields into bounded buyer-intent evidence used by listing signals, product demand metrics and cross-listing opportunities. Raw Q&A remains available for provenance and for the server-side AI listing-draft route. `product_listing_drafts` persists generated copy independently from competitor evidence.
+
+
+## V3.9.15 opportunity evidence classes
+
+The Opportunity engine has two active evidence classes:
+
+- `corroborated` — a product-family signal supported by multiple comparable listings;
+- `standalone` — one listing with unusually strong, sustained independent evidence when no reliable comparable cluster exists.
+
+Both persist in `opportunities`, link supporting research through `opportunity_listings`, and emit durable `opportunity_notifications`. `opportunity_type` is first-class schema state so UI and future scoring can apply different confidence semantics without overloading listing metadata.

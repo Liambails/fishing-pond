@@ -139,3 +139,19 @@ git push origin main
 ```
 
 Do not force-push as part of the routine deployment path. If `git fetch origin` reports divergence, reconcile it before pushing.
+
+## V3.9.12 database step
+
+Run `supabase/migrations/013_opportunity_signals.sql` in the Supabase SQL editor before relying on Opportunity Signals. The migration is additive and does not alter existing listings, observations, products, suppliers or scheduler history.
+
+No new secret is required. Automatic opportunity scans reuse `COBALT_INGEST_TOKEN` and `COBALT_WEB_URL` from the existing observer workflow.
+
+
+## V3.9.13 schema update
+
+After V3.9.12, run `supabase/migrations/014_marketplace_signal_intelligence.sql` in Supabase before deploying/using the V3.9.13 collector and Listing details tab. The migration is additive.
+
+
+## V3.9.15 schema update
+
+After V3.9.14, run `supabase/migrations/015_standalone_opportunity_signals.sql` before deploying V3.9.15. The migration is additive: it adds `opportunity_type` to the existing opportunity table and classifies existing rows as `corroborated` by default. No listing, observation, product or notification history is deleted.

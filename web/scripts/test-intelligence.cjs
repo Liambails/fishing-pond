@@ -69,3 +69,16 @@ assert.equal(shortWindow.velocityTrust, 0.35);
 assert.ok(shortWindow.velocity < shortWindow.rawRecentVelocity);
 
 console.log('intelligence temporal-evidence regression tests passed');
+
+// Stronger marketplace intent should raise engagement without bypassing temporal evidence gates.
+const intentRich = computeListingSignal(listing([
+  { captured_at: at(24), views: 10, watchers: 1, bids: 0, question_count: 1, purchase_intent_questions: 0 },
+  { captured_at: at(12), views: 13, watchers: 2, bids: 1, question_count: 3, purchase_intent_questions: 1 },
+  { captured_at: at(0), views: 16, watchers: 4, bids: 2, question_count: 5, purchase_intent_questions: 2 },
+]));
+assert.ok(intentRich.engagementScore >= 50, `buyer-intent score should reflect watchers/bids/Q&A, got ${intentRich.engagementScore}`);
+assert.equal(intentRich.purchaseIntentQuestions, 2);
+assert.equal(intentRich.questionCount, 5);
+assert.notEqual(intentRich.label, 'MUST_HAVE', 'buyer intent must not bypass repeated evidence requirements');
+
+console.log('marketplace-intent regression tests passed');

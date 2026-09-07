@@ -52,7 +52,7 @@ def _activity_snapshot(observations):
     if not rows:
         return {
             'observation_count': 0, 'span_hours': 0, 'views_per_day': None,
-            'view_delta': None, 'bid_delta': None, 'watcher_delta': None
+            'view_delta': None, 'bid_delta': None, 'watcher_delta': None, 'question_delta': None, 'purchase_question_delta': None
         }
     first, last = rows[0], rows[-1]
     try:
@@ -63,11 +63,15 @@ def _activity_snapshot(observations):
     fv, lv = _number(first.get('views')), _number(last.get('views'))
     fb, lb = _number(first.get('bids')), _number(last.get('bids'))
     fw, lw = _number(first.get('watchers')), _number(last.get('watchers'))
+    fq, lq = _number(first.get('question_count')), _number(last.get('question_count'))
+    fpq, lpq = _number(first.get('purchase_intent_questions')), _number(last.get('purchase_intent_questions'))
     raw_view_delta = (lv - fv) if fv is not None and lv is not None else None
     view_counter_anomaly = raw_view_delta is not None and raw_view_delta < 0
     view_delta = None if view_counter_anomaly else raw_view_delta
     bid_delta = (lb - fb) if fb is not None and lb is not None else None
     watcher_delta = (lw - fw) if fw is not None and lw is not None else None
+    question_delta = (lq - fq) if fq is not None and lq is not None else None
+    purchase_question_delta = (lpq - fpq) if fpq is not None and lpq is not None else None
     views_per_day = (view_delta / span_h * 24) if view_delta is not None and span_h >= 1 else None
     return {
         'observation_count': len(rows),
@@ -76,6 +80,8 @@ def _activity_snapshot(observations):
         'view_delta': int(view_delta) if view_delta is not None else None,
         'bid_delta': int(bid_delta) if bid_delta is not None else None,
         'watcher_delta': int(watcher_delta) if watcher_delta is not None else None,
+        'question_delta': int(question_delta) if question_delta is not None else None,
+        'purchase_question_delta': int(purchase_question_delta) if purchase_question_delta is not None else None,
         'latest_views': last.get('views'),
         'latest_bids': last.get('bids'),
         'latest_watchers': last.get('watchers'),
@@ -103,9 +109,11 @@ def adaptive_cadence_hours(listing, observations):
     v = a.get('views_per_day') or 0
     b = a.get('bid_delta') or 0
     w = a.get('watcher_delta') or 0
-    if v >= 12 or b >= 2:
+    q = a.get('question_delta') or 0
+    pq = a.get('purchase_question_delta') or 0
+    if v >= 12 or b >= 2 or pq >= 1:
         return 6, 'high sustained view/bid activity', a
-    if v >= 6 or b >= 1 or w >= 2:
+    if v >= 6 or b >= 1 or w >= 2 or q >= 2:
         return 8, 'strong sustained activity', a
     if v >= 2 or w >= 1 or own:
         return 12, 'own listing tracking' if own else 'active listing', a
@@ -134,7 +142,7 @@ def final_verdict(observations, closure_reason=None):
 
 
 def _recent_observations(db, listing_uuid, limit=12, episode=None):
-    q=(db.table('observations').select('captured_at,views,watchers,bids,buy_now_nzd,asking_price_nzd,current_bid_nzd,close_date,lifecycle_episode').eq('listing_uuid',listing_uuid))
+    q=(db.table('observations').select('captured_at,views,watchers,bids,question_count,purchase_intent_questions,buy_now_nzd,asking_price_nzd,current_bid_nzd,close_date,lifecycle_episode').eq('listing_uuid',listing_uuid))
     if episode is not None: q=q.eq('lifecycle_episode',episode)
     return q.order('captured_at',desc=True).limit(limit).execute().data or []
 
@@ -156,7 +164,12 @@ def save_success(listing, raw):
         'asking_price_nzd': raw.get('asking_price_nzd'), 'starting_price_nzd': raw.get('starting_price_nzd'),
         'current_bid_nzd': raw.get('current_bid_nzd'), 'views': raw.get('views'), 'watchers': raw.get('watchers'),
         'bids': raw.get('bids'), 'close_date': normalize_close_date(raw.get('close_date')),
-        'close_remaining': raw.get('close_remaining'), 'condition': raw.get('condition'), 'location': raw.get('location'),
+        'close_remaining': raw.get('close_remaining'), 'question_count': raw.get('question_count'),
+        'purchase_intent_questions': raw.get('purchase_intent_questions'), 'compatibility_questions': raw.get('compatibility_questions'),
+        'condition_questions': raw.get('condition_questions'), 'q_and_a': raw.get('q_and_a'), 'qa_identity_codes': raw.get('qa_identity_codes'),
+        'buy_now_available': raw.get('buy_now_available'), 'offer_available': raw.get('offer_available'), 'stock_quantity': raw.get('stock_quantity'),
+        'listing_status': raw.get('listing_status'), 'sold_detected': raw.get('sold_detected'),
+        'condition': raw.get('condition'), 'location': raw.get('location'),
         'seller': raw.get('seller'), 'seller_feedback_pct': raw.get('seller_feedback_pct'),
         'seller_feedback_count': raw.get('seller_feedback_count'), 'seller_in_trade': raw.get('seller_in_trade'),
         'seller_address_verified': raw.get('seller_address_verified'), 'seller_member_since': raw.get('seller_member_since'),

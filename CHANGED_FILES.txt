@@ -1,0 +1,41 @@
+COBALT V3.9.13 — Marketplace Intent + Q&A Intelligence + Listing Drafts
+
+Copy the CONTENTS of this source-update folder into the existing ~/cobalt repository.
+Do not delete the repository first. Preserve .git, web/.env.local, worker/.env, node_modules and .next.
+
+Database migration required before using V3.9.13 features:
+  supabase/migrations/014_marketplace_signal_intelligence.sql
+
+Changed source/docs:
+  docs/ARCHITECTURE.md
+  docs/SETUP.md
+  docs/ALGORITHMS_AND_FORMULAS.md
+  docs/README.md
+  docs/RELEASE_HISTORY.md
+  docs/SYSTEM_OVERVIEW.md
+  extension-v2/collector.js
+  extension-v2/manifest.json
+  supabase/migrations/014_marketplace_signal_intelligence.sql
+  web/app/api/ai/analyze/route.ts
+  web/app/api/ai/listing-review/route.ts
+  web/app/api/health/route.ts
+  web/app/api/ingest/route.ts
+  web/app/api/products/listing-draft/route.ts
+  web/app/globals.css
+  web/app/page.tsx
+  web/components/Dashboard.tsx
+  web/lib/intelligence.ts
+  web/lib/opportunities.ts
+  web/package.json
+  web/package-lock.json
+  web/scripts/test-intelligence.cjs
+  worker/collector.js
+  worker/db.py
+  worker/scheduler_telemetry.py
+
+Validation performed in the build workspace:
+  - node syntax checks: extension + worker collectors passed
+  - Python py_compile: worker files passed
+  - TypeScript --noEmit: passed
+  - npm run test:intelligence: passed temporal-evidence + marketplace-intent regressions
+  - full Next build: blocked only because this environment could not download the Linux SWC binary (registry DNS EAI_AGAIN)
