@@ -1,5 +1,6 @@
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
+from difflib import SequenceMatcher
 import re
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
@@ -39,7 +40,7 @@ def find_explicit_relist_link(page, requested_url: str, current_listing_id=None)
     """
     candidates=[]
     try:
-        anchors=page.locator('a[href]').evaluate_all("""els => els.map((a, i) => ({
+        anchors=page.locator('a[href]').evaluate_all(r"""els => els.map((a, i) => ({
           index:i,
           href:a.getAttribute('href') || '',
           absoluteHref:a.href || '',
@@ -78,6 +79,51 @@ def find_explicit_relist_link(page, requested_url: str, current_listing_id=None)
     candidates.sort(key=lambda c: (0 if re.search(r'view.*relist|relisted.*item|relisted.*listing', c['anchor_text'], re.I) else 1))
     return candidates[0]
 
+
+
+def find_relist_candidate_links(page, requested_url: str, current_listing_id=None, original_title=None, limit=12):
+    """Return conservative successor candidates visible on an ended listing page.
+
+    This supplements explicit relist links with ordinary Trade Me listing links whose anchor text
+    substantially resembles the ended title. The caller must still collect and semantically verify
+    the candidate (including seller identity) before linking lineage.
+    """
+    try:
+        anchors=page.locator('a[href]').evaluate_all(r"""els => els.map((a, i) => ({
+          index:i,
+          href:a.getAttribute('href') || '',
+          absoluteHref:a.href || '',
+          text:(a.innerText || a.textContent || '').replace(/\s+/g,' ').trim(),
+          aria:a.getAttribute('aria-label') || '',
+          title:a.getAttribute('title') || ''
+        }))""")
+    except Exception:
+        return []
+    old_id=str(current_listing_id or marketplace_listing_id(requested_url) or '')
+    old_title=' '.join(re.findall(r'[a-z0-9]+', str(original_title or '').lower()))
+    found={}
+    for a in anchors:
+        href=str(a.get('absoluteHref') or urljoin(page.url or requested_url, a.get('href') or ''))
+        if not _is_trademe_host(href):
+            continue
+        new_id=marketplace_listing_id(href)
+        if not new_id or new_id==old_id:
+            continue
+        label=str(a.get('text') or a.get('aria') or a.get('title') or '').strip()
+        norm_label=' '.join(re.findall(r'[a-z0-9]+', label.lower()))
+        semantic=bool(RELIST_WORDS.search(' '.join([label,str(a.get('href') or '')])))
+        similarity=SequenceMatcher(None, old_title, norm_label).ratio() if old_title and norm_label else 0.0
+        # Non-explicit links must look enough like the old title to justify a collection probe.
+        if not semantic and similarity < 0.42:
+            continue
+        item={'url':href,'listing_id':new_id,'anchor_text':label[:300],
+              'source':'marketplace_explicit_link' if semantic else 'ended_page_candidate',
+              'anchor_title_similarity':round(similarity,4)}
+        prev=found.get(new_id)
+        if prev is None or (semantic, similarity) > (prev['source']=='marketplace_explicit_link', prev.get('anchor_title_similarity',0)):
+            found[new_id]=item
+    return sorted(found.values(), key=lambda x:(x['source']!='marketplace_explicit_link',-x.get('anchor_title_similarity',0)))[:limit]
+
 def collect_listing(url: str, headless: bool = True) -> dict:
     with sync_playwright() as p:
         browser=p.chromium.launch(headless=headless)
@@ -107,6 +153,9 @@ def collect_listing(url: str, headless: bool = True) -> dict:
                 relist=find_explicit_relist_link(page, page.url or url, raw.get('listing_id'))
                 if relist:
                     raw['explicit_relist']=relist
+                raw['relist_candidates']=find_relist_candidate_links(
+                    page, page.url or url, raw.get('listing_id'), raw.get('listing_title'), limit=12
+                )
             raw['final_url']=page.url
             return raw
         finally:

@@ -212,3 +212,84 @@
 .queueStateTag.notInterested{background:#f2f2f2;border-color:#929aa2;color:#4e5963}
 .similarListingsModal{width:min(1180px,94vw)!important;max-width:1180px!important}.similarIntro{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;padding:9px 10px;border:1px solid #cbd5df;background:#f6f8fa}.similarIntro span{color:#5d6b79;font-size:11px;line-height:1.45}.similarTableWrap{overflow:auto;max-height:62vh;border:1px solid #c7d0d8}.similarTable{width:100%;min-width:920px}.similarTable th{position:sticky;top:0;z-index:2;background:#eef1f4}
 @media (hover:none),(pointer:coarse){.queueKebab{opacity:1}.queueActionsHead,.queueActionsCell{width:48px;min-width:48px;max-width:48px}.queueTable td:nth-last-child(2),.queueTable th:nth-last-child(2){padding-right:22px}}
+
+/* COBALT V3.9.18 — universal table interaction contract */
+/* Every scrollable COBALT table keeps page scrolling in control until the table is clicked. */
+.dataFrame,.similarTableWrap{overscroll-behavior:auto}
+.dataFrame.tableScrollActive,.similarTableWrap.tableScrollActive{overscroll-behavior:contain}
+/* Column labels remain visible whenever a table itself scrolls vertically. */
+.dataFrame thead th,.similarTableWrap thead th{position:sticky;top:0;z-index:30;background:#eef1f4;box-shadow:0 1px 0 #8fa1b2,0 4px 7px -6px rgba(20,38,54,.85)}
+
+/* Queue actions belong to the row, rather than looking like a permanent white utility column. */
+.queueActionsCell{background:inherit!important;border-left-color:transparent!important;transition:background .08s,border-color .08s}
+.queueRow:hover .queueActionsCell,.queueRow:focus-within .queueActionsCell{background:inherit!important;border-left-color:#b7c5d1!important}
+.queueActionsCell:before{opacity:0;transition:opacity .08s}
+.queueRow:hover .queueActionsCell:before,.queueRow:focus-within .queueActionsCell:before{opacity:1}
+.queueKebab{display:inline-grid;place-items:center;width:30px;height:28px;margin:0 auto;border:1px solid #7f98ad;border-radius:3px;background:linear-gradient(#fafdff,#dceaf5);color:#244b6c;font-size:19px;font-weight:700;line-height:1;box-shadow:inset 0 1px rgba(255,255,255,.9),0 1px 1px rgba(35,58,77,.12);opacity:0;transform:translateY(0);transition:opacity .08s,background .08s,border-color .08s,box-shadow .08s}
+.queueRow:hover .queueKebab,.queueRow:focus-within .queueKebab,.queueKebab[aria-expanded="true"]{opacity:1}
+.queueKebab:hover,.queueKebab:focus-visible,.queueKebab[aria-expanded="true"]{background:linear-gradient(#fff,#c9dfef);border-color:#416f94;box-shadow:inset 0 1px #fff,0 0 0 1px rgba(65,111,148,.12);outline:none}
+.queueActionMenu{min-width:238px;border:1px solid #607b92;border-radius:3px;background:#f8fafc;box-shadow:0 10px 26px rgba(25,45,62,.26);padding:5px}
+.queueActionMenu button{min-height:36px;border:1px solid transparent;border-radius:2px;background:transparent;padding:8px 11px;color:#243746;font-weight:600}
+.queueActionMenu button:hover,.queueActionMenu button:focus-visible{background:#e4f0f8;border-color:#b8cedf;outline:none}
+.queueActionMenu .dangerMenuItem{color:#922828}.queueActionMenu .dangerMenuItem:hover,.queueActionMenu .dangerMenuItem:focus-visible{background:#fff0f0;border-color:#e0b7b7}
+.queueActionDivider{background:#cfd9e1;margin:5px 4px}
+
+/* COBALT V3.9.18 sourcing-first UX + zero-wheel-work table locking */
+/* Locked tables are not scroll containers at all. This deliberately avoids wheel handlers,
+   scrollBy calls and scroll chaining while the user is moving down the page. */
+.dataFrame.tableScrollLocked,.similarTableWrap.tableScrollLocked{overflow:clip!important;overscroll-behavior:auto!important;cursor:default}
+.dataFrame.tableScrollActive,.similarTableWrap.tableScrollActive{overflow:auto!important;overscroll-behavior:contain!important}
+.dataFrame.tableScrollLocked::before,.similarTableWrap.tableScrollLocked::before{content:"";position:absolute;inset:0;z-index:34;background:rgba(231,238,244,.18);opacity:0;pointer-events:none;transition:opacity .1s ease}
+.dataFrame.tableScrollLocked::after,.similarTableWrap.tableScrollLocked::after{content:"Click to enable table scrolling";position:absolute;z-index:35;left:50%;top:50%;transform:translate(-50%,-50%);padding:7px 11px;border:1px solid rgba(91,113,132,.45);border-radius:4px;background:rgba(247,250,252,.94);box-shadow:0 2px 7px rgba(35,53,68,.12);color:#496276;font-size:11px;font-weight:700;letter-spacing:.01em;opacity:0;pointer-events:none;white-space:nowrap;transition:opacity .1s ease}
+.dataFrame.tableScrollLocked:hover::before,.dataFrame.tableScrollLocked:hover::after,.similarTableWrap.tableScrollLocked:hover::before,.similarTableWrap.tableScrollLocked:hover::after{opacity:1}
+.dataFrame.tableScrollActive::before,.dataFrame.tableScrollActive::after,.similarTableWrap.tableScrollActive::before,.similarTableWrap.tableScrollActive::after{display:none}
+
+/* Row actions float over the row's natural right edge. There is no actions column or permanent gutter. */
+.queueEndCell{position:relative!important;padding-right:42px!important;min-width:72px}
+.queueFloatingAction{position:absolute;right:6px;top:50%;transform:translateY(-50%);z-index:12;opacity:0;pointer-events:none;transition:opacity .08s ease}
+.queueRow:hover .queueFloatingAction,.queueRow:focus-within .queueFloatingAction{opacity:1;pointer-events:auto}
+.queueKebab{display:grid;place-items:center;width:30px;height:30px;margin:0;border:1px solid rgba(78,108,133,.5);border-radius:5px;background:rgba(242,247,251,.92);color:#244b6c;font-size:19px;font-weight:700;line-height:1;box-shadow:0 1px 3px rgba(27,47,64,.12);opacity:1;cursor:pointer;transition:background .08s,border-color .08s,box-shadow .08s,transform .08s}
+.queueKebab:hover,.queueKebab:focus-visible,.queueKebab[aria-expanded="true"]{background:#fff;border-color:#356a96;box-shadow:0 2px 7px rgba(29,70,104,.2);outline:none;transform:translateY(-1px)}
+.queueActionMenu{min-width:230px;border:1px solid #7890a4;border-radius:6px;background:#fbfcfd;box-shadow:0 12px 30px rgba(24,43,59,.25);padding:5px}
+.queueActionMenu button{min-height:37px;border:0;border-radius:4px;background:transparent;padding:8px 10px;color:#243746;font-weight:650}
+.queueActionMenu button:hover,.queueActionMenu button:focus-visible{background:#e9f2f8;outline:none}
+.queueActionMenu .dangerMenuItem{color:#8b2d2d}.queueActionMenu .dangerMenuItem:hover,.queueActionMenu .dangerMenuItem:focus-visible{background:#fff0f0;color:#791f1f}
+.queueActionDivider{height:1px;background:#d7e0e7;margin:4px 5px}
+@media (hover:none),(pointer:coarse){.queueFloatingAction{opacity:1;pointer-events:auto}}
+
+/* Sourcing opportunities use a conventional bell + unread badge instead of a text button. */
+.notificationBell{position:relative;display:grid;place-items:center;min-width:0!important;width:42px;height:42px;padding:0!important;border:1px solid rgba(255,255,255,.45)!important;border-radius:7px!important;background:rgba(255,255,255,.06)!important;color:#fff!important;cursor:pointer;box-shadow:none!important}
+.notificationBell svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.notificationBell:hover,.notificationBell:focus-visible,.notificationBell.hasUnread{background:rgba(255,255,255,.14)!important;border-color:rgba(255,255,255,.78)!important;outline:none}
+.notificationBadge{position:absolute;right:-6px;top:-7px;display:grid;place-items:center;min-width:18px;height:18px;padding:0 4px;border:2px solid #245f92;border-radius:999px;background:#f5f8fb;color:#174f82;font-size:9px;font-weight:900;line-height:1;box-sizing:border-box}
+.notificationEmpty b,.notificationEmpty span{display:block}.notificationEmpty span{margin-top:4px}
+
+/* User-facing sourcing stages. Internal EMERGING/STRONG storage remains backward compatible. */
+.opportunitySignalLead.early_lead{border-left:5px solid #7b68b5}
+.opportunitySignalLead.strong_lead{border-left:5px solid #19765a}
+.opportunitySignalLead.source_now{border-left:5px solid #b06a15;background:#fffcf6}
+.opportunityEyebrow{letter-spacing:.08em}
+
+/* Plain-English queue copy gets the space; technical evidence confidence is details-only. */
+.whyCell{position:relative}.whyContent{max-width:620px;line-height:1.42}.confidenceWhy{display:none}
+
+
+/* V3.9.18 final table interaction: one lightweight gate owns the entire locked surface. */
+.dataFrame.tableScrollLocked,.similarTableWrap.tableScrollLocked{overflow:clip!important;overscroll-behavior:auto!important}
+.dataFrame.tableScrollLocked::before,.dataFrame.tableScrollLocked::after,.similarTableWrap.tableScrollLocked::before,.similarTableWrap.tableScrollLocked::after{display:none!important}
+.tableScrollGate{position:absolute;inset:0;z-index:80;width:100%;height:100%;padding:0;border:0;border-radius:0;background:rgba(31,48,63,.035);opacity:1;cursor:pointer;display:grid;place-items:center;color:#30485c;transition:background .06s ease}
+.tableScrollGate span{opacity:0;transform:translateY(2px);padding:8px 12px;border:1px solid rgba(79,101,120,.46);border-radius:5px;background:rgba(248,250,252,.96);box-shadow:0 2px 9px rgba(25,42,56,.16);font-size:11px;font-weight:800;letter-spacing:.01em;transition:opacity .06s ease,transform .06s ease}
+.tableScrollLocked:hover>.tableScrollGate{background:rgba(35,53,68,.14)}
+.tableScrollLocked:hover>.tableScrollGate span{opacity:1;transform:none}
+.tableScrollActive>.tableScrollGate{display:none}
+.tableScrollLocked table{pointer-events:none}
+.tableScrollActive table{pointer-events:auto}
+.queueViewportActionHead,.queueViewportActionCell{position:sticky!important;right:0!important;width:0!important;min-width:0!important;max-width:0!important;padding:0!important;border:0!important;background:transparent!important;overflow:visible!important;z-index:45!important}
+.queueViewportActionHead{z-index:55!important}
+.queueViewportActionCell .queueFloatingAction{position:absolute!important;right:7px!important;top:50%!important;transform:translateY(-50%)!important;margin:0!important}
+.queueEndCell{position:static!important;padding-right:8px!important;min-width:0}
+.queueRow:hover .queueViewportActionCell .queueFloatingAction,.queueRow:focus-within .queueViewportActionCell .queueFloatingAction{opacity:1;pointer-events:auto}
+.tableScrollLocked .queueFloatingAction{opacity:0!important;pointer-events:none!important}
+.opportunityPriceNote{display:block;margin-top:3px;color:#647586;font-size:10px;line-height:1.35;font-weight:400}
+
+.priceCarryForward{display:block;margin-top:2px;color:#71808d;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}

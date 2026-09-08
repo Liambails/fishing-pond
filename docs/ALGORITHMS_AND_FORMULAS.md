@@ -1,6 +1,6 @@
 # COBALT — algorithms and formulas
 
-This document describes the deterministic calculations in the current V3.9.17 codebase. When thresholds/formulas change, update this file in the same commit.
+This document describes the deterministic calculations in the current V3.9.19 codebase. When thresholds/formulas change, update this file in the same commit.
 
 ## 0. Capture episodes
 
@@ -141,23 +141,16 @@ The dashboard's **Promising** counter currently counts active `MUST_HAVE`, `GOOD
 
 ## 3. Adaptive observation cadence
 
-Initial learning ladder:
+Current cadence bands:
 
 ```text
-n <= 1 observations -> 6h
-n == 2              -> 6h
-n == 3              -> 12h
+HOT     repeated strong gains across independent windows -> 3h
+WARM    sustained positive movement                       -> 6h
+NORMAL  some movement / insufficient sustained heat       -> 12h
+COLD    repeated flat movement                             -> 24h
 ```
 
-Mature cadence (`n >= 4`):
-
-```text
-views/day >= 12 OR bid_delta >= 2                  -> 6h
-views/day >= 6 OR bid_delta >= 1 OR watcher_delta >= 2 -> 8h
-views/day >= 2 OR watcher_delta >= 1               -> 12h
-own listing without stronger band                   -> 12h
-otherwise                                            -> 24h
-```
+An independent view window is separated by at least 3 hours. Shorter raw captures remain history but do not earn repeated-activity cadence credit. Cadence is separate from the listing label: a WATCHING listing can heat to 3h, while a historically GOOD listing can cool to 12h/24h. When a trusted `close_date` occurs sooner than the normal next check, COBALT schedules a closure confirmation at roughly `close_date + 10 minutes`.
 
 This cadence is evidence-driven, not anti-detection behavior.
 
@@ -353,7 +346,7 @@ Views are deliberately **not** identity proof because counters can reset between
 
 ## Cross-listing opportunity detection (V3.9.12)
 
-Opportunity detection deliberately requires corroboration across listings. A listing is eligible for clustering only when it has at least two independent observation windows and positive trusted view velocity. A family is surfaced only when at least three comparable listings have positive movement and the median trusted velocity is at least 3.5 views/day.
+Opportunity detection is a sourcing-lead layer rather than a duplicate of the conservative listing label. Family candidates require at least two related evidence-bearing listings overall and at least one **live positive** listing. Current qualification combines live 24-hour view gains, Current pace, number of live positives, evidence span and buyer-intent signals; recent ended episodes may add bounded historical support. `EARLY_LEAD` can therefore surface before every member earns GOOD, while `STRONG_LEAD`/`SOURCE_NOW` require deeper corroboration. Exact current gates live in `web/lib/opportunities.ts` and are regression-tested.
 
 Clustering combines:
 
@@ -433,6 +426,17 @@ A product family may become `STRONG` through sustained cross-listing view moveme
 A Trade Me listing draft is generated once per My Product and persisted. The source snapshot contains accepted research listings, descriptions, structured identity data and public Q&A. AI may rewrite sales copy, but must not invent or silently promote uncertain identity/condition claims. Individual fields can be regenerated independently.
 
 
+
+## V3.9.18 sourcing-lead policy
+
+Listing labels and sourcing opportunities deliberately answer different questions. `GOOD` remains a conservative statement about one listing and still requires at least four independent observation windows. An Opportunity is lower-cost research advice: “is this product worth spending time checking with suppliers?” Because the cost of a false-positive research lead is small, Opportunities are allowed to surface earlier than `GOOD` when corroborated marketplace movement is already useful.
+
+Cross-listing clustering uses the category-agnostic similarity core (TF-IDF text similarity, token overlap, category-path overlap and shared identifier-like tokens). A family can begin as an `EARLY_LEAD` when at least two related listings have repeated checks and meaningful positive movement. `STRONG_LEAD` and `SOURCE_NOW` require progressively deeper time coverage, more independently moving listings, stronger 24-hour view movement and/or stronger buyer-intent evidence.
+
+Standalone leads are higher uncertainty. They require at least three independent checks, at least 12 hours of evidence, and meaningful movement plus either buyer-intent evidence or unusually strong view growth. Stronger standalone stages require at least four checks and longer trusted intervals.
+
+`Current pace` is a rate estimate, not a count: `views gained / elapsed hours * 24`, with temporal damping inherited from the listing-signal engine. User-facing explanations therefore lead with actual deltas (`views since last check`, `views in last 24 hours`) and use Current pace only as secondary context.
+
 ## V3.9.15 standalone opportunity detection
 
 Cross-listing corroboration remains the preferred sourcing evidence, but lack of comparables must not make a genuinely unusual product invisible. A listing can therefore create a standalone opportunity when it passes a deliberately harder evidence gate.
@@ -465,3 +469,55 @@ Standalone opportunities are not created for listings that are already members o
 Trade Me view counts are accepted only from views-specific DOM elements, explicitly labelled view text inside a views-specific element, or a trusted accessibility/title label. COBALT no longer scans the whole flattened page for a nearby `views` token because unrelated numbers such as years can be mis-associated with that label. If no trusted counter is available, the observation stores `views = null`; missing evidence is preferred to fabricated velocity.
 
 Legacy captures whose provenance starts with `page-text:` are quarantined at ingest/worker persistence and must not be used as trusted view evidence. A repair recheck stores a fresh observation instead of rewriting a historical row with a later view count.
+
+
+### V3.9.18 final cadence / pricing clarification
+- Observation cadence now heats and cools on real view gains across independent (>=3h) checks: Hot 3h, Warm 6h, Normal 12h, Cold 24h.
+- Missing marketplace price does **not** invalidate demand evidence. A listing can be GOOD or support an Opportunity from view/bid/buyer-intent evidence even when no price is exposed.
+- Missing prices are never converted to zero and are excluded from opportunity price ranges and product suggested-price benchmarks. Opportunities disclose partial/no price coverage explicitly.
+- Opportunity scans return a compact audit of the strongest qualified families/standalone leads so production scans can be inspected instead of silently waiting.
+- Locked tables are covered by a single full-surface interaction gate; child hover/click behavior is disabled until activation, and row actions are anchored to the visible right edge during horizontal scrolling.
+- A transient missing price no longer erases previously captured price evidence: the queue and opportunity pricing use the most recent known non-null marketplace price and mark it as carried forward when the newest capture omits price.
+
+
+## V3.9.19 lifecycle-episode and relist rules
+
+### Current-episode scoring
+
+Every observation carries `lifecycle_episode`. Listing-level view deltas, independent evidence windows, Current pace, confidence/evidence quality and label gating use only observations whose episode equals the listing's current episode. Therefore a relist reset is a new baseline:
+
+```text
+episode 1: 22 -> 27 views
+episode 2:  2 ->  5 views
+
+current episode delta = +3
+never: 27 -> 2 = -25
+```
+
+Historical episodes remain available to family-level research and lifecycle analysis.
+
+### Relist detection hierarchy
+
+1. Same marketplace ID was closed/relist-watch and later becomes live: deterministic same-ID new episode.
+2. Collecting the old URL resolves to a different marketplace listing ID: deterministic redirect lineage.
+3. Marketplace page explicitly links a relisted/new listing: deterministic explicit-link lineage.
+4. Candidate links discovered on the ended page are collected and compared.
+5. New manually discovered same-seller listings can be compared against recently closed listings.
+
+The semantic fallback is category-agnostic. Same seller is a hard gate, then evidence combines title/text similarity, token overlap, category overlap, description overlap, generic code-like identifiers, timing and (when both are available) price proximity. Price absence never blocks lineage. A high matcher score or strong shared identifier can auto-confirm, but if the second-best candidate is within `0.08` of the best score COBALT refuses to guess. Matcher scores are ranking/confidence heuristics, **not empirically calibrated probabilities**.
+
+### Relist watch timing
+
+After a confirmed closure, normal successor probes are scheduled approximately 1h, 6h, 18h, 48h and 96h later, bounded by a roughly ten-day watch horizon. The worker reserves part of each run for due relist-watch rows so a large active backlog does not starve them.
+
+### Recent-ended Opportunity support
+
+An active family Opportunity requires at least one live positive listing. Ended evidence contributes only as supporting context:
+
+```text
+ended <= 7 days ago    -> historical support weight 1.00
+ended 7..30 days ago   -> historical support weight 0.35
+ended > 30 days ago    -> not used for current Opportunity qualification
+```
+
+Live listings remain the source for current 24-hour movement and live observed price ranges.

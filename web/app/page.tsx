@@ -1,6 +1,7 @@
 import {adminClient} from '../lib/supabase';
 import {computeProductMetrics,computeListingSignals} from '../lib/intelligence';
 import Dashboard from '../components/Dashboard';
+import {fetchPaged} from '../lib/pagedQuery';
 export const dynamic='force-dynamic';
 
 function median(values:number[]){if(!values.length)return null;const a=[...values].sort((x,y)=>x-y);const m=Math.floor(a.length/2);return a.length%2?a[m]:(a[m-1]+a[m])/2;}
@@ -12,21 +13,22 @@ function observationSpanHours(listing:any){
 
 export default async function Page(){
  const db=adminClient();
- const [{data:products},{data:listings},{data:obs},{data:errors},{data:events},{data:links},{data:ownListings},{data:matchCandidates},{data:opportunities},{data:opportunityNotifications},{data:opportunityLinks},{data:listingDrafts}]=await Promise.all([
-  db.from('products').select('*').is('archived_at',null).order('priority',{ascending:false}).limit(100),
-  db.from('listings').select('*').order('next_observation_at',{ascending:true}).limit(250),
-  db.from('observations').select('listing_uuid,captured_at,views,watchers,bids,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,close_date,close_remaining,question_count,purchase_intent_questions,compatibility_questions,condition_questions,buy_now_available,offer_available,stock_quantity,listing_status,sold_detected,qa_identity_codes').order('captured_at',{ascending:false}).limit(5000),
+ const [products,listings,obs,{data:errors},{data:events},links,ownListings,matchCandidates,{data:opportunities},{data:opportunityNotifications},opportunityLinks,listingDrafts]=await Promise.all([
+  fetchPaged(()=>db.from('products').select('*').is('archived_at',null).order('priority',{ascending:false}),1000,5000),
+  fetchPaged(()=>db.from('listings').select('*').order('next_observation_at',{ascending:true}).order('id',{ascending:true}),1000,10000),
+  fetchPaged(()=>db.from('observations').select('listing_uuid,captured_at,lifecycle_episode,views,watchers,bids,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,close_date,close_remaining,question_count,purchase_intent_questions,compatibility_questions,condition_questions,buy_now_available,offer_available,stock_quantity,listing_status,sold_detected,qa_identity_codes').order('captured_at',{ascending:false}).order('id',{ascending:false}),1000,100000),
   db.from('collection_errors').select('*').order('occurred_at',{ascending:false}).limit(150),
   db.from('system_events').select('*').order('occurred_at',{ascending:false}).limit(150),
-  db.from('product_listings').select('*'),
-  db.from('own_listings').select('*').eq('active',true),
-  db.from('product_match_candidates').select('*').in('status',['review','accepted','auto_linked']),
-  db.from('opportunities').select('*').order('last_detected_at',{ascending:false}).limit(100),
-  db.from('opportunity_notifications').select('*').order('created_at',{ascending:false}).limit(200),
-  db.from('opportunity_listings').select('*'),
-  db.from('product_listing_drafts').select('*')
+  fetchPaged(()=>db.from('product_listings').select('*').order('product_id',{ascending:true}),1000,50000),
+  fetchPaged(()=>db.from('own_listings').select('*').eq('active',true).order('id',{ascending:true}),1000,10000),
+  fetchPaged(()=>db.from('product_match_candidates').select('*').in('status',['review','accepted','auto_linked']).order('id',{ascending:true}),1000,50000),
+  db.from('opportunities').select('*').order('last_detected_at',{ascending:false}).limit(500),
+  db.from('opportunity_notifications').select('*').order('created_at',{ascending:false}).limit(500),
+  fetchPaged(()=>db.from('opportunity_listings').select('*').order('opportunity_id',{ascending:true}),1000,50000),
+  fetchPaged(()=>db.from('product_listing_drafts').select('*').order('product_id',{ascending:true}),1000,10000)
  ]);
- const baseLs=(listings||[]).map((l:any)=>({...l,observations:(obs||[]).filter((o:any)=>o.listing_uuid===l.id).slice(0,40)}));
+ const obsByListing=new Map<string,any[]>();for(const o of obs||[]){const k=String(o.listing_uuid);const a=obsByListing.get(k)||[];if(a.length<80){a.push(o);obsByListing.set(k,a)}}
+ const baseLs=(listings||[]).map((l:any)=>({...l,observations:obsByListing.get(String(l.id))||[]}));
  const signals=computeListingSignals(baseLs);
  const ls=baseLs.map((l:any,i:number)=>({...l,signal:signals[i]}));
  const ps=(products||[]).map((p:any)=>{

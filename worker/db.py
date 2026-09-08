@@ -2,6 +2,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from supabase import create_client
 import os, re
+from cadence import activity_snapshot as _activity_snapshot, adaptive_cadence_hours
 
 
 def client():
@@ -9,13 +10,24 @@ def client():
 
 
 def due_listings(limit: int = 3):
-    now = datetime.now(timezone.utc).isoformat(); db=client()
-    active=(db.table('listings').select('*').eq('active',True).lte('next_observation_at',now).order('priority',desc=True).order('next_observation_at').limit(limit).execute().data or [])
-    # Closed listings are checked sparsely for a relist. They stay inactive so they never inflate live competitor counts.
-    watch=(db.table('listings').select('*').eq('lifecycle_state','relist_watch').lte('next_observation_at',now).order('next_observation_at').limit(limit).execute().data or [])
-    merged={x['id']:x for x in active+watch}
-    return sorted(merged.values(),key=lambda x:(0 if x.get('active') else 1,-int(x.get('priority') or 0),x.get('next_observation_at') or ''))[:limit]
+    """Return due live listings while reserving capacity for relist-watch probes.
 
+    Without a reserved slice, a large live backlog can starve every closed-listing relist check.
+    COBALT keeps roughly 20% of each worker run available for due relist watches, then fills any
+    unused capacity with ordinary live observations.
+    """
+    now = datetime.now(timezone.utc).isoformat(); db=client(); limit=max(1,int(limit or 1))
+    watch_quota=max(1,min(5,round(limit*.20))) if limit>=3 else 1
+    watch=(db.table('listings').select('*').eq('lifecycle_state','relist_watch').lte('next_observation_at',now).order('next_observation_at').limit(watch_quota).execute().data or [])
+    active_limit=max(0,limit-len(watch))
+    active=(db.table('listings').select('*').eq('active',True).lte('next_observation_at',now).order('priority',desc=True).order('next_observation_at').limit(active_limit).execute().data or [])
+    # If live work is sparse, use the remaining slots for additional due relist probes.
+    remaining=limit-len(active)-len(watch)
+    if remaining>0:
+        extra=(db.table('listings').select('*').eq('lifecycle_state','relist_watch').lte('next_observation_at',now).order('next_observation_at').limit(watch_quota+remaining).execute().data or [])
+        known={x['id'] for x in watch}
+        watch.extend(x for x in extra if x['id'] not in known)
+    return (active+watch)[:limit]
 
 def normalize_close_date(v):
     if not v:
@@ -43,81 +55,6 @@ def _number(v):
     except Exception:
         return None
 
-
-def _activity_snapshot(observations):
-    rows = sorted(
-        [o for o in observations if o.get('captured_at')],
-        key=lambda o: o['captured_at']
-    )
-    if not rows:
-        return {
-            'observation_count': 0, 'span_hours': 0, 'views_per_day': None,
-            'view_delta': None, 'bid_delta': None, 'watcher_delta': None, 'question_delta': None, 'purchase_question_delta': None
-        }
-    first, last = rows[0], rows[-1]
-    try:
-        span_h = max(0, (datetime.fromisoformat(last['captured_at'].replace('Z', '+00:00')) -
-                         datetime.fromisoformat(first['captured_at'].replace('Z', '+00:00'))).total_seconds() / 3600)
-    except Exception:
-        span_h = 0
-    fv, lv = _number(first.get('views')), _number(last.get('views'))
-    fb, lb = _number(first.get('bids')), _number(last.get('bids'))
-    fw, lw = _number(first.get('watchers')), _number(last.get('watchers'))
-    fq, lq = _number(first.get('question_count')), _number(last.get('question_count'))
-    fpq, lpq = _number(first.get('purchase_intent_questions')), _number(last.get('purchase_intent_questions'))
-    raw_view_delta = (lv - fv) if fv is not None and lv is not None else None
-    view_counter_anomaly = raw_view_delta is not None and raw_view_delta < 0
-    view_delta = None if view_counter_anomaly else raw_view_delta
-    bid_delta = (lb - fb) if fb is not None and lb is not None else None
-    watcher_delta = (lw - fw) if fw is not None and lw is not None else None
-    question_delta = (lq - fq) if fq is not None and lq is not None else None
-    purchase_question_delta = (lpq - fpq) if fpq is not None and lpq is not None else None
-    views_per_day = (view_delta / span_h * 24) if view_delta is not None and span_h >= 1 else None
-    return {
-        'observation_count': len(rows),
-        'span_hours': round(span_h, 2),
-        'views_per_day': round(views_per_day, 2) if views_per_day is not None else None,
-        'view_delta': int(view_delta) if view_delta is not None else None,
-        'bid_delta': int(bid_delta) if bid_delta is not None else None,
-        'watcher_delta': int(watcher_delta) if watcher_delta is not None else None,
-        'question_delta': int(question_delta) if question_delta is not None else None,
-        'purchase_question_delta': int(purchase_question_delta) if purchase_question_delta is not None else None,
-        'latest_views': last.get('views'),
-        'latest_bids': last.get('bids'),
-        'latest_watchers': last.get('watchers'),
-        'view_counter_anomaly': view_counter_anomaly,
-    }
-
-
-def adaptive_cadence_hours(listing, observations):
-    """Evidence-driven cadence only. No anti-detection/stealth behavior."""
-    a = _activity_snapshot(observations)
-    own = str((listing.get('metadata') or {}).get('ownership') or '').lower() == 'own'
-    n = a['observation_count']
-
-    # Initial learning ladder:
-    # capture #1 -> +6h -> #2 -> +6h -> #3 -> +12h -> #4.
-    # Shorter early intervals establish velocity before mature adaptive scheduling.
-    if n <= 1:
-        return 6, 'learning phase · second observation', a
-    if n == 2:
-        return 6, 'learning phase · confirm early velocity', a
-    if n == 3:
-        return 12, 'learning phase · establish first-day persistence', a
-
-    # Mature adaptive cadence. Raw total views are not a demand threshold.
-    v = a.get('views_per_day') or 0
-    b = a.get('bid_delta') or 0
-    w = a.get('watcher_delta') or 0
-    q = a.get('question_delta') or 0
-    pq = a.get('purchase_question_delta') or 0
-    if v >= 12 or b >= 2 or pq >= 1:
-        return 6, 'high sustained view/bid activity', a
-    if v >= 6 or b >= 1 or w >= 2 or q >= 2:
-        return 8, 'strong sustained activity', a
-    if v >= 2 or w >= 1 or own:
-        return 12, 'own listing tracking' if own else 'active listing', a
-    return 24, 'low recent activity', a
 
 def final_verdict(observations, closure_reason=None):
     a = _activity_snapshot(observations)
@@ -161,146 +98,129 @@ def _quarantine_unsafe_views(raw):
     return raw
 
 
+RELIST_CHECK_DELAYS_HOURS=(1,6,18,48,96)
+
+def effective_ended(raw):
+    if bool((raw or {}).get('listing_ended')):
+        return True
+    close=normalize_close_date((raw or {}).get('close_date'))
+    if not close:
+        return False
+    try:
+        # A short grace avoids classifying a page as ended at the exact close-second while the
+        # marketplace is still transitioning the UI.
+        return datetime.fromisoformat(close.replace('Z','+00:00')) <= datetime.now(timezone.utc)-timedelta(minutes=2)
+    except Exception:
+        return False
+
+def _next_relist_check(check_count):
+    i=max(0,int(check_count or 0))
+    if i>=len(RELIST_CHECK_DELAYS_HOURS):
+        return None
+    return (datetime.now(timezone.utc)+timedelta(hours=RELIST_CHECK_DELAYS_HOURS[i])).isoformat()
+
 def save_success(listing, raw):
-    db = client()
-    raw = _quarantine_unsafe_views(raw)
-    # Persist provenance with every automatic observation so dashboard diagnostics
-    # can distinguish GitHub-worker captures from manual Chrome-extension captures.
-    raw = dict(raw or {})
-    raw['capture_source'] = 'worker-auto'
-    lid = listing['id']
-    captured = raw.get('captured_at') or datetime.now(timezone.utc).isoformat()
-    q = raw.get('extraction_quality') or {}
-    reopened = listing.get('lifecycle_state') == 'relist_watch' and not bool(raw.get('listing_ended'))
-    episode = int(listing.get('lifecycle_episode') or 1) + (1 if reopened else 0)
-    obs = {
-        'listing_uuid': lid, 'captured_at': captured, 'lifecycle_episode': episode, 'collector_version': raw.get('collector_version'),
-        'listing_mode': raw.get('listing_mode'), 'buy_now_nzd': raw.get('buy_now_nzd'),
-        'asking_price_nzd': raw.get('asking_price_nzd'), 'starting_price_nzd': raw.get('starting_price_nzd'),
-        'current_bid_nzd': raw.get('current_bid_nzd'), 'views': raw.get('views'), 'watchers': raw.get('watchers'),
-        'bids': raw.get('bids'), 'close_date': normalize_close_date(raw.get('close_date')),
-        'close_remaining': raw.get('close_remaining'), 'question_count': raw.get('question_count'),
-        'purchase_intent_questions': raw.get('purchase_intent_questions'), 'compatibility_questions': raw.get('compatibility_questions'),
-        'condition_questions': raw.get('condition_questions'), 'q_and_a': raw.get('q_and_a'), 'qa_identity_codes': raw.get('qa_identity_codes'),
-        'buy_now_available': raw.get('buy_now_available'), 'offer_available': raw.get('offer_available'), 'stock_quantity': raw.get('stock_quantity'),
-        'listing_status': raw.get('listing_status'), 'sold_detected': raw.get('sold_detected'),
-        'condition': raw.get('condition'), 'location': raw.get('location'),
-        'seller': raw.get('seller'), 'seller_feedback_pct': raw.get('seller_feedback_pct'),
-        'seller_feedback_count': raw.get('seller_feedback_count'), 'seller_in_trade': raw.get('seller_in_trade'),
-        'seller_address_verified': raw.get('seller_address_verified'), 'seller_member_since': raw.get('seller_member_since'),
-        'shipping_options': raw.get('shipping_options'), 'pickup_available': raw.get('pickup_available'),
-        'part_number': raw.get('part_number'), 'part_number_candidates': raw.get('part_number_candidates'),
-        'vehicle': raw.get('vehicle'), 'chassis': raw.get('chassis') or raw.get('chassis_code_label'),
-        'years': raw.get('years') or raw.get('vehicle_year_label'),
-        'engine_code': raw.get('engine_code') or raw.get('engine_code_label'), 'part_type': raw.get('part_type'),
-        'extraction_score': q.get('score', raw.get('extraction_score')),
-        'quality_flags': q.get('warnings', raw.get('quality_flags') or []), 'raw_snapshot': raw
+    db = client(); raw=_quarantine_unsafe_views(raw); raw=dict(raw or {}); raw['capture_source']='worker-auto'
+    lid=listing['id']; captured=raw.get('captured_at') or datetime.now(timezone.utc).isoformat(); q=raw.get('extraction_quality') or {}
+    prior_state=str(listing.get('lifecycle_state') or 'active'); ended=effective_ended(raw)
+    reopened=prior_state in {'relist_watch','terminal_closed','relisted'} and not ended
+    episode=int(listing.get('lifecycle_episode') or 1)+(1 if reopened else 0)
+    obs={
+        'listing_uuid':lid,'captured_at':captured,'lifecycle_episode':episode,'collector_version':raw.get('collector_version'),'listing_mode':raw.get('listing_mode'),
+        'buy_now_nzd':raw.get('buy_now_nzd'),'asking_price_nzd':raw.get('asking_price_nzd'),'starting_price_nzd':raw.get('starting_price_nzd'),'current_bid_nzd':raw.get('current_bid_nzd'),
+        'views':raw.get('views'),'watchers':raw.get('watchers'),'bids':raw.get('bids'),'close_date':normalize_close_date(raw.get('close_date')),'close_remaining':raw.get('close_remaining'),
+        'question_count':raw.get('question_count'),'purchase_intent_questions':raw.get('purchase_intent_questions'),'compatibility_questions':raw.get('compatibility_questions'),'condition_questions':raw.get('condition_questions'),'q_and_a':raw.get('q_and_a'),'qa_identity_codes':raw.get('qa_identity_codes'),
+        'buy_now_available':raw.get('buy_now_available'),'offer_available':raw.get('offer_available'),'stock_quantity':raw.get('stock_quantity'),'listing_status':raw.get('listing_status'),'sold_detected':raw.get('sold_detected'),
+        'condition':raw.get('condition'),'location':raw.get('location'),'seller':raw.get('seller'),'seller_feedback_pct':raw.get('seller_feedback_pct'),'seller_feedback_count':raw.get('seller_feedback_count'),'seller_in_trade':raw.get('seller_in_trade'),'seller_address_verified':raw.get('seller_address_verified'),'seller_member_since':raw.get('seller_member_since'),
+        'shipping_options':raw.get('shipping_options'),'pickup_available':raw.get('pickup_available'),'part_number':raw.get('part_number'),'part_number_candidates':raw.get('part_number_candidates'),'vehicle':raw.get('vehicle'),'chassis':raw.get('chassis') or raw.get('chassis_code_label'),'years':raw.get('years') or raw.get('vehicle_year_label'),'engine_code':raw.get('engine_code') or raw.get('engine_code_label'),'part_type':raw.get('part_type'),
+        'extraction_score':q.get('score',raw.get('extraction_score')),'quality_flags':q.get('warnings',raw.get('quality_flags') or []),'raw_snapshot':raw
     }
-    db.table('observations').upsert(obs, on_conflict='listing_uuid,captured_at').execute()
-    history = _recent_observations(db, lid, episode=episode)
-    ended = bool(raw.get('listing_ended'))
-    patch = {
-        'last_seen': captured, 'last_observed_at': captured, 'consecutive_failures': 0, 'last_error': None,
-        'title': raw.get('listing_title') or listing.get('title'), 'seller': raw.get('seller') or listing.get('seller'),
-        'last_success_source': 'worker'
-    }
+    # Repeated relist-watch probes of an already-ended page are lifecycle checks, not fresh market
+    # evidence. Do not append frozen post-close observations that would distort the final episode.
+    persist_observation=not (ended and prior_state in {'relist_watch','terminal_closed','relisted'})
+    if persist_observation:
+        db.table('observations').upsert(obs,on_conflict='listing_uuid,captured_at').execute()
+    history=_recent_observations(db,lid,episode=episode)
+    patch={'last_seen':captured,'last_observed_at':captured,'consecutive_failures':0,'last_error':None,'title':raw.get('listing_title') or listing.get('title'),'seller':raw.get('seller') or listing.get('seller'),'last_success_source':'worker','last_relist_checked_at':captured if prior_state=='relist_watch' else listing.get('last_relist_checked_at')}
     if ended:
-        reason = raw.get('listing_end_reason') or 'ended'
-        verdict, score, evidence = final_verdict(history, reason)
-        checks=int(listing.get('relist_check_count') or 0)
-        # First close -> 6h, then 24h, then 72h. After the third still-closed check, retire the URL.
-        delays=[6,24,72]; terminal=listing.get('lifecycle_state')=='relist_watch' and checks>=3
-        next_check=None if terminal else (datetime.now(timezone.utc)+timedelta(hours=delays[min(checks,len(delays)-1)])).isoformat()
-        patch.update({
-            'active': False, 'lifecycle_state': 'terminal_closed' if terminal else 'relist_watch',
-            'next_observation_at': next_check, 'relist_check_count': checks+1 if listing.get('lifecycle_state')=='relist_watch' else 0,
-            'relist_watch_until': (datetime.now(timezone.utc)+timedelta(days=7)).isoformat() if listing.get('lifecycle_state')!='relist_watch' else listing.get('relist_watch_until'),
-            'observation_interval_hours': listing.get('observation_interval_hours',24), 'finalized_at': captured, 'final_verdict': verdict, 'final_score': score,
-            'final_evidence': evidence, 'closure_reason': reason, 'cadence_reason': 'listing closed permanently after relist watch' if terminal else f'closed · relist watch next check {next_check}'
-        })
+        reason=raw.get('listing_end_reason') or ('expired' if normalize_close_date(raw.get('close_date')) else 'ended')
+        verdict,score,evidence=final_verdict(history,reason)
+        if prior_state=='relist_watch':
+            checks=int(listing.get('relist_check_count') or 0)+1
+        else:
+            checks=0
+        next_check=_next_relist_check(checks)
+        watch_until=listing.get('relist_watch_until') or (datetime.now(timezone.utc)+timedelta(days=10)).isoformat()
+        if watch_until and datetime.fromisoformat(str(watch_until).replace('Z','+00:00')) <= datetime.now(timezone.utc):
+            next_check=None
+        terminal=next_check is None
+        patch.update({'active':False,'lifecycle_state':'terminal_closed' if terminal else 'relist_watch','next_observation_at':next_check,'relist_check_count':checks,'relist_watch_until':watch_until,'observation_interval_hours':listing.get('observation_interval_hours',24),'finalized_at':listing.get('finalized_at') or captured,'final_verdict':verdict,'final_score':score,'final_evidence':evidence,'closure_reason':reason,'cadence_reason':'ended · relist watch complete' if terminal else f'ended · relist check {checks+1}/{len(RELIST_CHECK_DELAYS_HOURS)} scheduled'})
         try:
-            db.table('listing_lifecycle_events').insert({'listing_uuid':lid,'listing_family_id':listing.get('listing_family_id') or lid,'marketplace':listing.get('marketplace') or 'Trade Me','marketplace_listing_id':listing.get('listing_id'),'episode':episode,'event_type':'terminal_closed' if terminal else ('relist_check_still_closed' if listing.get('lifecycle_state')=='relist_watch' else 'closed_relist_watch'),'occurred_at':captured,'reason':{'closure_reason':reason,'check_count':checks,'next_check':next_check}}).execute()
+            db.table('listing_lifecycle_events').insert({'listing_uuid':lid,'listing_family_id':listing.get('listing_family_id') or lid,'marketplace':listing.get('marketplace') or 'Trade Me','marketplace_listing_id':listing.get('listing_id'),'episode':episode,'event_type':'terminal_closed' if terminal else ('relist_check_still_closed' if prior_state=='relist_watch' else 'closed_relist_watch'),'occurred_at':captured,'reason':{'closure_reason':reason,'check_count':checks,'next_check':next_check,'effective_end_from_close_date':not bool(raw.get('listing_ended'))}}).execute()
         except Exception as e: print(f'WARNING: lifecycle event write failed: {e}')
     else:
-        hours, reason, evidence = adaptive_cadence_hours(listing, history)
-        own = str((listing.get('metadata') or {}).get('ownership') or '').lower() == 'own'
-        priority = 95 if own else (88 if hours <= 6 else 80 if hours <= 8 else 68 if hours <= 12 else 50)
-        patch.update({
-            'active': True, 'lifecycle_state': 'active', 'lifecycle_episode': episode, 'relist_check_count': 0, 'relist_watch_until': None, 'last_relisted_at': captured if reopened else listing.get('last_relisted_at'), 'observation_interval_hours': hours, 'priority': priority,
-            'next_observation_at': (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat(),
-            'cadence_reason': reason, 'finalized_at': None, 'final_verdict': None, 'final_score': None,
-            'final_evidence': {}, 'closure_reason': None
-        })
+        hours,reason,evidence=adaptive_cadence_hours(listing,history); own=str((listing.get('metadata') or {}).get('ownership') or '').lower()=='own'; priority=95 if own else (92 if hours<=3 else 88 if hours<=6 else 68 if hours<=12 else 50)
+        next_dt=datetime.now(timezone.utc)+timedelta(hours=hours)
+        close_iso=normalize_close_date(raw.get('close_date'))
+        if close_iso:
+            try:
+                closure_probe=datetime.fromisoformat(close_iso.replace('Z','+00:00'))+timedelta(minutes=10)
+                if closure_probe>datetime.now(timezone.utc) and closure_probe<next_dt:
+                    next_dt=closure_probe; reason=f'{reason} · closure check shortly after expiry'
+            except Exception: pass
+        patch.update({'active':True,'lifecycle_state':'active','lifecycle_episode':episode,'relist_check_count':0,'relist_watch_until':None,'last_relisted_at':captured if reopened else listing.get('last_relisted_at'),'relist_match_confidence':1 if reopened else listing.get('relist_match_confidence'),'relist_detection_method':'same_marketplace_id_reopened' if reopened else listing.get('relist_detection_method'),'observation_interval_hours':hours,'priority':priority,'next_observation_at':next_dt.isoformat(),'cadence_reason':'relisted · same marketplace ID · new episode' if reopened else reason,'finalized_at':None,'final_verdict':None,'final_score':None,'final_evidence':{},'closure_reason':None})
         if reopened:
-            patch['cadence_reason']='relisted · same marketplace ID'
-            try: db.table('listing_lifecycle_events').insert({'listing_uuid':lid,'listing_family_id':listing.get('listing_family_id') or lid,'marketplace':listing.get('marketplace') or 'Trade Me','marketplace_listing_id':listing.get('listing_id'),'episode':episode,'event_type':'relisted_same_id','occurred_at':captured,'confidence':1,'reason':{'detected':'closed URL became active again'}}).execute()
+            try: db.table('listing_lifecycle_events').insert({'listing_uuid':lid,'listing_family_id':listing.get('listing_family_id') or lid,'marketplace':listing.get('marketplace') or 'Trade Me','marketplace_listing_id':listing.get('listing_id'),'episode':episode,'event_type':'relisted_same_id','occurred_at':captured,'confidence':1,'reason':{'detected':'closed marketplace ID became live again','counter_reset_is_new_episode':True}}).execute()
             except Exception as e: print(f'WARNING: relist lifecycle event write failed: {e}')
-    db.table('listings').update(patch).eq('id', lid).execute()
-    try:
-        db.table('collection_errors').update({
-            'status': 'resolved', 'resolved_at': captured, 'recovered_at': captured,
-            'recovery_source': 'worker', 'resolution_note': 'Recovered by a later successful COBALT collection.'
-        }).eq('listing_uuid', lid).eq('status', 'open').execute()
-    except Exception:
-        # Recovery metadata is additive; never turn a successful observation into a failed run.
-        pass
+    db.table('listings').update(patch).eq('id',lid).execute()
+    try: db.table('collection_errors').update({'status':'resolved','resolved_at':captured,'recovered_at':captured,'recovery_source':'worker','resolution_note':'Recovered by a later successful COBALT collection.'}).eq('listing_uuid',lid).eq('status','open').execute()
+    except Exception: pass
+    return {'episode':episode,'ended':ended,'reopened':reopened,'observation_saved':persist_observation}
 
+def register_relist_successor(parent, candidate, detection_method='semantic_match', confidence=0.9, reasons=None):
+    """Idempotently link a new marketplace ID as the next lifecycle episode."""
+    db=client(); now=datetime.now(timezone.utc).isoformat(); candidate=dict(candidate or {})
+    new_id=str(candidate.get('listing_id') or '').strip(); new_url=str(candidate.get('url') or candidate.get('final_url') or '').strip()
+    if not new_id or not new_url or new_id==str(parent.get('listing_id') or ''): return None,False
+    existing=(db.table('listings').select('*').eq('marketplace',parent.get('marketplace') or 'Trade Me').eq('listing_id',new_id).limit(1).execute().data or [])
+    family=parent.get('listing_family_id') or parent['id']; episode=int(parent.get('lifecycle_episode') or 1)+1; created=False
+    common={'listing_family_id':family,'relisted_from':parent['id'],'lifecycle_episode':episode,'last_relisted_at':now,'relist_match_confidence':float(confidence),'relist_detection_method':detection_method}
+    if existing:
+        child=existing[0]; patch={k:v for k,v in common.items() if k not in {'relisted_from'} or not child.get('relisted_from')}
+        if child.get('relisted_from') and child.get('relisted_from')!=parent['id']:
+            return None,False
+        db.table('listings').update(patch).eq('id',child['id']).execute(); child={**child,**patch}
+    else:
+        metadata=dict(parent.get('metadata') or {}); metadata.update({'discovery_source':detection_method,'relist_from':str(parent.get('listing_id') or '')})
+        row={'product_id':parent.get('product_id'),'marketplace':parent.get('marketplace') or 'Trade Me','listing_id':new_id,'url':new_url,'source_url':new_url,'title':candidate.get('listing_title') or candidate.get('title'),'seller':candidate.get('seller') or parent.get('seller'),'active':True,'first_seen':now,'last_seen':now,'next_observation_at':now,'observation_interval_hours':3,'priority':max(92,int(parent.get('priority') or 50)),'consecutive_failures':0,'metadata':metadata,'lifecycle_state':'active','relist_check_count':0,'relist_watch_until':None,'cadence_reason':f'relist discovered · {detection_method}',**common}
+        child=db.table('listings').insert(row).execute().data[0]; created=True
+    # Finalize the old episode before moving lineage to the successor. Redirect-based relists can
+    # be discovered before COBALT ever got a dedicated post-close capture, so do not leave the
+    # parent looking historically 'active' or without a final evidence snapshot.
+    parent_episode=int(parent.get('lifecycle_episode') or 1)
+    parent_history=_recent_observations(db,parent['id'],limit=24,episode=parent_episode)
+    verdict,final_score,evidence=final_verdict(parent_history,'relisted')
+    latest_close=next((x.get('close_date') for x in parent_history if x.get('close_date')),None)
+    finalized_at=parent.get('finalized_at') or latest_close or now
+    db.table('listings').update({
+        'active':False,'lifecycle_state':'relisted','next_observation_at':None,
+        'relist_successor_uuid':child['id'],'last_relist_checked_at':now,
+        'cadence_reason':f'relisted as marketplace listing {new_id}',
+        'closure_reason':f'relisted to #{new_id}','finalized_at':finalized_at,
+        'final_verdict':parent.get('final_verdict') or verdict,
+        'final_score':parent.get('final_score') if parent.get('final_score') is not None else final_score,
+        'final_evidence':parent.get('final_evidence') or evidence,
+    }).eq('id',parent['id']).execute()
+    prior=(db.table('listing_lifecycle_events').select('id').eq('listing_uuid',child['id']).eq('previous_listing_uuid',parent['id']).in_('event_type',['relisted_new_id','relisted_explicit_link','relisted_redirect']).limit(1).execute().data or [])
+    if not prior:
+        event_type='relisted_redirect' if detection_method=='marketplace_redirect' else ('relisted_explicit_link' if detection_method=='marketplace_explicit_link' else 'relisted_new_id')
+        db.table('listing_lifecycle_events').insert({'listing_uuid':child['id'],'listing_family_id':family,'marketplace':parent.get('marketplace') or 'Trade Me','marketplace_listing_id':new_id,'episode':episode,'event_type':event_type,'previous_listing_uuid':parent['id'],'occurred_at':now,'confidence':float(confidence),'reason':{'detection_method':detection_method,'source_listing_id':parent.get('listing_id'),'reasons':reasons or [],'url':new_url,'counter_reset_is_new_episode':True}}).execute()
+    return child,created
 
 
 def register_explicit_relist(parent, relist):
-    """Idempotently register a marketplace-explicit new-ID successor.
-
-    Returns (successor_listing, created_now). Existing successors are never reactivated here;
-    that preserves CAPTCHA/manual-recovery pauses and the successor's own scheduler state.
-    """
-    db=client(); now=datetime.now(timezone.utc).isoformat()
-    new_id=str((relist or {}).get('listing_id') or '').strip()
-    new_url=str((relist or {}).get('url') or '').strip()
-    if not new_id or not new_url or new_id == str(parent.get('listing_id') or ''):
-        return None, False
-    existing=(db.table('listings').select('*').eq('marketplace',parent.get('marketplace') or 'Trade Me').eq('listing_id',new_id).limit(1).execute().data or [])
-    family=parent.get('listing_family_id') or parent['id']
-    episode=int(parent.get('lifecycle_episode') or 1)+1
-    created=False
-    if existing:
-        child=existing[0]
-        # Fill relationship fields only when absent. Never overwrite a different established
-        # lineage or scheduling/failure state merely because the old page is revisited.
-        patch={}
-        if not child.get('relisted_from'): patch['relisted_from']=parent['id']
-        if not child.get('listing_family_id'): patch['listing_family_id']=family
-        if int(child.get('lifecycle_episode') or 1) < episode: patch['lifecycle_episode']=episode
-        if patch:
-            db.table('listings').update(patch).eq('id',child['id']).execute()
-            child={**child,**patch}
-    else:
-        metadata=dict(parent.get('metadata') or {})
-        metadata.update({'discovery_source':'marketplace_explicit_relist_link','explicit_relist_from':str(parent.get('listing_id') or '')})
-        row={
-            'product_id':parent.get('product_id'),'marketplace':parent.get('marketplace') or 'Trade Me',
-            'listing_id':new_id,'url':new_url,'source_url':new_url,'title':None,'seller':parent.get('seller'),
-            'active':True,'first_seen':now,'next_observation_at':now,'observation_interval_hours':6,
-            'priority':max(90,int(parent.get('priority') or 50)),'consecutive_failures':0,'metadata':metadata,
-            'listing_family_id':family,'relisted_from':parent['id'],'lifecycle_state':'active','lifecycle_episode':episode,
-            'relist_check_count':0,'relist_watch_until':None,'last_relisted_at':now,'cadence_reason':'discovered via explicit marketplace relist link'
-        }
-        child=db.table('listings').insert(row).execute().data[0]; created=True
-    # The old URL has done its job. Stop sparse relist polling once the marketplace itself has
-    # supplied a concrete successor. The child owns future observations/recovery from here.
-    db.table('listings').update({
-        'active':False,'lifecycle_state':'terminal_closed','next_observation_at':None,
-        'cadence_reason':f'explicit relist successor discovered · {new_id}'
-    }).eq('id',parent['id']).execute()
-    # Lifecycle insert is idempotent at application level: don't duplicate the same edge.
-    prior=(db.table('listing_lifecycle_events').select('id').eq('listing_uuid',child['id']).eq('previous_listing_uuid',parent['id']).eq('event_type','relisted_explicit_link').limit(1).execute().data or [])
-    if not prior:
-        db.table('listing_lifecycle_events').insert({
-            'listing_uuid':child['id'],'listing_family_id':family,'marketplace':parent.get('marketplace') or 'Trade Me',
-            'marketplace_listing_id':new_id,'episode':episode,'event_type':'relisted_explicit_link',
-            'previous_listing_uuid':parent['id'],'occurred_at':now,'confidence':1,
-            'reason':{'detected':'marketplace explicit relist link','source_listing_id':parent.get('listing_id'),'anchor_text':(relist or {}).get('anchor_text'),'url':new_url}
-        }).execute()
-    return child, created
+    method='marketplace_explicit_link'
+    return register_relist_successor(parent,relist,detection_method=method,confidence=1.0,reasons=['marketplace explicitly linked successor'])
 
 def save_failure(listing, error):
     db = client()

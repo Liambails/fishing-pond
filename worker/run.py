@@ -2,7 +2,8 @@ import os,json,time,traceback,urllib.request
 from datetime import datetime,timezone
 from dotenv import load_dotenv
 from collector import collect_listing,marketplace_listing_id
-from db import client,due_listings,save_success,save_failure,log_collection_error,register_explicit_relist
+from db import client,due_listings,save_success,save_failure,log_collection_error,register_explicit_relist,register_relist_successor,effective_ended
+from relist import compare_relist,pick_best_relist
 from scheduler_telemetry import upsert,finish,local_log
 
 load_dotenv(); MAX=int(os.getenv('MAX_LISTINGS_PER_RUN','12')); HEADLESS=os.getenv('HEADLESS','true').lower() not in ('0','false','no')
@@ -24,6 +25,77 @@ def run_matcher_for_listing(listing_uuid):
   print(f'MATCHER WARNING: live comparable reconciliation failed: {e}')
   return None
 
+def _candidate_listing(raw):
+ return {
+  'listing_id':str(raw.get('listing_id') or marketplace_listing_id(raw.get('final_url')) or ''),
+  'url':raw.get('final_url') or raw.get('url'),
+  'title':raw.get('listing_title'),
+  'seller':raw.get('seller'),
+  'metadata':{'category_path':raw.get('category_path') or []}
+ }
+
+def _latest_parent_observation(db,listing):
+ rows=(db.table('observations').select('*').eq('listing_uuid',listing['id']).order('captured_at',desc=True).limit(1).execute().data or [])
+ return rows[0] if rows else {'captured_at':listing.get('last_observed_at'),'raw_snapshot':{'listing_title':listing.get('title'),'seller':listing.get('seller')}}
+
+def detect_relist_from_capture(listing,raw,db,headless,run_id=None):
+ """Resolve redirect, marketplace-explicit, and conservative semantic relist evidence.
+
+ Returns a diagnostic dict or None. A successor's first counters are always saved into the child
+ episode, never as a negative delta on the ended parent.
+ """
+ parent_id=str(listing.get('listing_id') or '')
+ observed_id=str(raw.get('listing_id') or marketplace_listing_id(raw.get('final_url')) or '')
+ if observed_id and observed_id!=parent_id:
+  child_raw=raw; child,created=register_relist_successor(listing,{**_candidate_listing(child_raw),'listing_id':observed_id},'marketplace_redirect',1.0,['old listing URL resolved to a different marketplace listing ID'])
+  if child:
+   save_success(child,child_raw); run_matcher_for_listing(child['id'])
+   return {'listing_id':observed_id,'created':created,'source':'marketplace_redirect','confidence':1.0,'capture':'success','views':child_raw.get('views')}
+  return {'listing_id':observed_id,'created':False,'source':'marketplace_redirect','capture':'rejected'}
+ if not effective_ended(raw):
+  return None
+ candidates=list(raw.get('relist_candidates') or [])
+ explicit=raw.get('explicit_relist')
+ if explicit and not any(str(x.get('url'))==str(explicit.get('url')) for x in candidates): candidates.insert(0,explicit)
+ if not candidates: return None
+ parent_obs=_latest_parent_observation(db,listing); scored=[]; diagnostics=[]
+ for cand in candidates[:6]:
+  cid=str(cand.get('listing_id') or '')
+  source=str(cand.get('source') or 'ended_page_candidate')
+  if source=='marketplace_explicit_link' and cid and cid!=parent_id:
+   # Trade Me itself naming a different successor is deterministic lineage evidence. Register
+   # immediately; the first child capture can recover manually if the marketplace challenges us.
+   child,created=register_explicit_relist(listing,cand)
+   if not child: continue
+   try:
+    child_raw=collect_listing(child['url'],headless); actual=str(child_raw.get('listing_id') or marketplace_listing_id(child_raw.get('final_url')) or '')
+    if actual and actual!=str(child.get('listing_id')):
+     child,created=register_relist_successor(listing,{**_candidate_listing(child_raw),'listing_id':actual},'marketplace_redirect',1.0,['explicit relist link redirected to successor'])
+    save_success(child,child_raw); run_matcher_for_listing(child['id'])
+    return {'listing_id':child.get('listing_id'),'created':created,'source':'marketplace_explicit_link','confidence':1.0,'capture':'success','views':child_raw.get('views')}
+   except Exception as e:
+    failures=save_failure(child,e)
+    try: log_collection_error(child,e,run_id,failures)
+    except Exception: pass
+    return {'listing_id':child.get('listing_id'),'created':created,'source':'marketplace_explicit_link','confidence':1.0,'capture':'manual_recovery','error_type':getattr(e,'error_type',e.__class__.__name__),'error':str(e)[:1000]}
+  try:
+   child_raw=collect_listing(cand['url'],headless); actual=str(child_raw.get('listing_id') or marketplace_listing_id(child_raw.get('final_url')) or '')
+   if not actual or actual==parent_id: continue
+   cl=_candidate_listing(child_raw); cl['listing_id']=actual
+   match=compare_relist(cl,{**child_raw,'raw_snapshot':child_raw},listing,parent_obs,method='ended_page_semantic')
+   scored.append(({'listing':cl,'raw':child_raw,'candidate':cand},match)); diagnostics.append({'listing_id':actual,**match.to_dict()})
+  except Exception as e:
+   diagnostics.append({'listing_id':cid or None,'error_type':getattr(e,'error_type',e.__class__.__name__),'error':str(e)[:500]})
+ best,ranked=pick_best_relist(scored)
+ if not best:
+  return {'source':'ended_page_candidates','linked':False,'candidates':diagnostics[:6]}
+ bundle,match=best; cl=bundle['listing']; child_raw=bundle['raw']
+ child,created=register_relist_successor(listing,cl,'ended_page_semantic',match.score,match.reasons)
+ if child:
+  save_success(child,child_raw); run_matcher_for_listing(child['id'])
+  return {'listing_id':child.get('listing_id'),'created':created,'source':'ended_page_semantic','confidence':match.score,'capture':'success','views':child_raw.get('views'),'reasons':match.reasons,'candidates':diagnostics[:6]}
+ return {'source':'ended_page_candidates','linked':False,'candidates':diagnostics[:6]}
+
 def main():
  started=iso_now(); db=client(); selected=[]; run=None
  try:
@@ -42,56 +114,18 @@ def main():
    attempted+=1; item_started=time.monotonic(); before_due=listing.get('next_observation_at')
    print(f"Opening {listing['listing_id']} priority={listing.get('priority')} due={before_due}")
    try:
-    raw=collect_listing(listing['url'],HEADLESS); save_success(listing,raw); match_result=run_matcher_for_listing(listing['id'])
+    raw=collect_listing(listing['url'],HEADLESS)
+    observed_id=str(raw.get('listing_id') or marketplace_listing_id(raw.get('final_url')) or '')
     relist_result=None
-    explicit=raw.get('explicit_relist') if raw.get('listing_ended') else None
-    if explicit:
-     child=None; created=False; child_raw=None
-     # Direct links can be registered before navigation. Semantic redirect links are first
-     # resolved by ordinary Chromium navigation; the final URL/collector ID must prove a
-     # different marketplace listing before lineage is created.
-     if explicit.get('listing_id'):
-      child,created=register_explicit_relist(listing,explicit)
-     if not explicit.get('listing_id'):
-      try:
-       child_raw=collect_listing(explicit['url'],HEADLESS)
-       resolved_id=str(child_raw.get('listing_id') or marketplace_listing_id(child_raw.get('final_url')) or '')
-       if not resolved_id or resolved_id==str(listing.get('listing_id') or ''):
-        raise RuntimeError('Explicit relist redirect did not resolve to a different marketplace listing ID')
-       explicit={**explicit,'listing_id':resolved_id,'url':child_raw.get('final_url') or explicit['url'],'resolved_redirect':True}
-       child,created=register_explicit_relist(listing,explicit)
-      except Exception as resolve_e:
-       resolved_id=marketplace_listing_id(getattr(resolve_e,'final_url',None))
-       if resolved_id and resolved_id!=str(listing.get('listing_id') or ''):
-        explicit={**explicit,'listing_id':resolved_id,'url':getattr(resolve_e,'final_url',None) or explicit['url'],'resolved_redirect':True}
-        child,created=register_explicit_relist(listing,explicit)
-        child_failures=save_failure(child,resolve_e)
-        try: log_collection_error(child,resolve_e,run['id'],child_failures)
-        except Exception as log_e: print(f'WARNING: failed to write relist redirect collection error: {log_e}')
-        relist_result={'listing_id':resolved_id,'created':created,'source':'marketplace_explicit_link','capture':'manual_recovery','error_type':getattr(resolve_e,'error_type',resolve_e.__class__.__name__),'error':str(resolve_e)[:1000]}
-        print(f"RELIST REDIRECT CHILD PAUSED {resolved_id} [{relist_result['error_type']}] {resolve_e}")
-       else:
-        # No validated successor ID means we do not create a possibly-wrong listing edge. Keep
-        # the parent on sparse relist watch and record diagnostics in this run.
-        relist_result={'listing_id':None,'created':False,'source':'marketplace_explicit_link','capture':'unresolved','error_type':getattr(resolve_e,'error_type',resolve_e.__class__.__name__),'error':str(resolve_e)[:1000]}
-        print(f"RELIST REDIRECT UNRESOLVED {listing['listing_id']} [{relist_result['error_type']}] {resolve_e}")
-     if child and relist_result is None:
-      relist_result={'listing_id':child.get('listing_id'),'created':created,'source':'marketplace_explicit_link','resolved_redirect':bool(explicit.get('resolved_redirect'))}
-      print(f"RELIST LINK {listing['listing_id']} -> {relist_result.get('listing_id')} created={created}")
-     # If redirect resolution already collected the child, persist that exact capture. Otherwise
-     # a newly registered direct successor gets one immediate normal collection attempt.
-     if child and (created or child_raw is not None) and relist_result.get('capture')!='manual_recovery':
-      try:
-       if child_raw is None: child_raw=collect_listing(child['url'],HEADLESS)
-       save_success(child,child_raw); run_matcher_for_listing(child['id'])
-       relist_result['capture']='success'; relist_result['views']=child_raw.get('views')
-       print(f"RELIST SUCCESS {child['listing_id']} views={child_raw.get('views')}")
-      except Exception as child_e:
-       child_failures=save_failure(child,child_e)
-       try: log_collection_error(child,child_e,run['id'],child_failures)
-       except Exception as log_e: print(f'WARNING: failed to write relist child collection error: {log_e}')
-       relist_result.update({'capture':'manual_recovery','error_type':getattr(child_e,'error_type',child_e.__class__.__name__),'error':str(child_e)[:1000]})
-       print(f"RELIST CHILD PAUSED {child['listing_id']} [{relist_result['error_type']}] {child_e}")
+    if observed_id and observed_id!=str(listing.get('listing_id') or ''):
+     # Detect the redirect before persistence: successor counters must never be written onto the
+     # ended parent UUID.
+     relist_result=detect_relist_from_capture(listing,raw,db,HEADLESS,run['id']); match_result=None
+    else:
+     save_success(listing,raw); match_result=run_matcher_for_listing(listing['id'])
+     # Persist the closure first, then inspect explicit/semantic successor candidates.
+     if effective_ended(raw):
+      relist_result=detect_relist_from_capture(listing,raw,db,HEADLESS,run['id'])
     ok+=1
     after=(db.table('listings').select('next_observation_at,observation_interval_hours,cadence_reason').eq('id',listing['id']).limit(1).execute().data or [{}])[0]
     duration_ms=int((time.monotonic()-item_started)*1000)

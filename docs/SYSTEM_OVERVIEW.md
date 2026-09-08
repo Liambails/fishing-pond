@@ -12,7 +12,7 @@ COBALT is Motera's product-opportunity research system. It turns marketplace lis
 
 COBALT deliberately separates **collection**, **identity**, **market intelligence**, and **sourcing decisions**. A high view count is evidence of attention, not proof of a sale.
 
-Current release: **V3.9.11 — Observation Decision Inbox + UI Layering**.
+Current release: **V3.9.19 — Relist Lineage + Historical Evidence**.
 
 ## End-to-end architecture
 
@@ -83,7 +83,7 @@ The extension also has durable saved-state semantics. A complete initial capture
 
 ### Automatic capture
 
-GitHub Actions wakes on the configured schedule and records a scheduler heartbeat before installing Python dependencies. `due_check.py` asks Supabase whether any active or relist-watch listing is due. Chromium is installed only when work is due (or when the workflow is manually dispatched). The worker then processes due listings up to `MAX_LISTINGS_PER_RUN`.
+AWS EventBridge Scheduler invokes the Lambda bridge every 10 minutes, which dispatches the GitHub `workflow_dispatch` worker. The workflow records a scheduler heartbeat before installing Python dependencies. `due_check.py` asks Supabase whether any active or relist-watch listing is due. Chromium is installed only when work is due (or when the workflow is manually dispatched). The worker then processes due listings up to `MAX_LISTINGS_PER_RUN`.
 
 The automated worker uses a normal Playwright Chromium session. It does not rotate proxies, spoof fingerprints, solve CAPTCHAs, or bypass human-verification/access challenges. Challenge states are recorded and collection backs off.
 
@@ -98,13 +98,13 @@ A listing is the marketplace identity/URL being tracked. An observation is a tim
 New listings pass through an initial learning ladder:
 
 ```text
-observation #1 -> +6h
-observation #2 -> +6h
-observation #3 -> +12h
-observation #4+ -> mature adaptive cadence
+early evidence -> 12h unless activity already warrants faster checking
+repeated positive independent windows -> 6h
+strong repeated activity -> 3h
+repeated flat activity -> 24h
 ```
 
-Mature cadence uses recent view/bid/watcher movement. Current bands are 6h, 8h, 12h, or 24h. Own listings have a 12h baseline when no stronger activity band applies. Full rules are in `ALGORITHMS_AND_FORMULAS.md`.
+Cadence heats and cools independently of the GOOD label. Current normal bands are **3h / 6h / 12h / 24h**, driven primarily by real gains across independent (>=3h) windows. A known close time can schedule an earlier closure confirmation roughly 10 minutes after expiry. Full rules are in `ALGORITHMS_AND_FORMULAS.md`.
 
 ## Listing lifecycle and relists
 
@@ -113,13 +113,13 @@ Closure is not treated as proof of sale. A closed listing freezes its completed 
 ```text
 active
   -> closed
-  -> relist_watch (~6h -> ~24h -> ~72h)
+  -> relist_watch (~1h -> 6h -> 18h -> 48h -> 96h; bounded watch)
       -> relisted_same_id
       -> relisted_new_id
       -> terminal_closed
 ```
 
-Same-ID resurrection opens a new lifecycle episode. New-ID relists can be linked into the same `listing_family_id` using seller identity, structured part/fitment evidence, title/description similarity, price proximity, and timing. Observations retain `lifecycle_episode`, preventing view counters from separate relist episodes from being treated as one continuous counter.
+Same-ID resurrection opens a new lifecycle episode. New-ID relists remain separate marketplace listing rows but link into the same `listing_family_id`. Detection prefers deterministic marketplace evidence (URL redirect or explicit successor link), then uses a conservative category-agnostic same-seller matcher over title/category/description/identifiers/timing. Observations retain `lifecycle_episode`, so a relist counter reset starts at a fresh baseline instead of becoming negative velocity.
 
 The dashboard renders new-ID relists as an indented lineage/tree and marks same-ID relists with an episode indicator.
 
@@ -145,7 +145,7 @@ A manual `Not comparable` decision is durable and prevents the automatic matcher
 
 ## Comparable Market Engine
 
-V3.9.11 uses deterministic **hybrid-v2** matching. It is not pure cosine similarity.
+Product CRM matching uses deterministic structured/domain evidence plus fuzzy text evidence. Queue peer/suppression and relist matching use category-agnostic similarity primitives; Product CRM still has domain adapters where structured identity is available.
 
 The matcher first derives structured automotive identity:
 
@@ -173,7 +173,7 @@ These are deliberately separate concepts.
 
 **Observation Queue** is the human decision inbox over that research. It defaults to unresolved `active` listings and orders them by **Most promising**, heavily prioritizing signal class and then confidence, trusted velocity, independent evidence depth, and recent view growth. Operators can alternatively order by Velocity, Confidence, or Newest and filter by Active, In 'My Products', Dismissed, or All. The persisted internal state value remains `promoted` for backward compatibility.
 
-Creating (or automatically promoting) a Product changes the source listing to `promoted`, records `product_id`, and removes it from the default Active queue without deleting its listing/observation evidence. Manual dismissal similarly removes a candidate from Active while preserving its history; it can later be restored. Queue status and decision time are stored in existing listing metadata, so V3.9.11 requires no migration.
+Creating a Product explicitly changes the source listing to `promoted`, records `product_id`, and removes it from the default Active queue without deleting its listing/observation evidence. Manual dismissal similarly removes a candidate from Active while preserving its history; it can later be restored. Queue status and decision time are stored in listing metadata. Product creation is operator-controlled; the legacy auto-promotion endpoint is disabled/non-mutating.
 
 **Product metrics** aggregate accepted comparable listings and combine demand, competition, margin, evidence, fitment, supplier readiness, and operational risk. Product metrics should never be interpreted as proof of sales where the marketplace does not expose a sale event.
 
@@ -206,6 +206,9 @@ Migrations are applied in numeric order. Current sequence:
 - `012_structured_comparable_identity.sql` — structured identity + durable manual overrides.
 - `013_opportunity_signals.sql` — durable product-family opportunities and bell notifications.
 - `014_marketplace_signal_intelligence.sql` — public Q&A/behavioural observation fields and persistent product listing drafts.
+- `015_standalone_opportunity_signals.sql` — standalone opportunity evidence class.
+- `016_interest_suppression.sql` — durable Not Interested similarity suppression.
+- `017_relist_lineage_hardening.sql` — auditable relist successor/detection fields.
 
 Do not assume a deployment is healthy merely because application code deployed: schema and application versions must be compatible.
 
@@ -213,7 +216,8 @@ Do not assume a deployment is healthy merely because application code deployed: 
 
 - **Supabase** — persistent Postgres data and operational telemetry.
 - **Vercel** — Next.js dashboard and API routes under `web/`.
-- **GitHub Actions** — scheduled Playwright observation worker.
+- **AWS EventBridge + Lambda** — scheduler clock/dispatch bridge.
+- **GitHub Actions** — Playwright worker compute invoked via `workflow_dispatch`.
 - **Chrome extension** — user-initiated discovery/manual capture.
 
 Secrets belong in local env files or deployment secret stores and must never be committed. The service-role key must never be exposed to browser-side code.

@@ -13,6 +13,7 @@ export type Obs = {
   question_count?:number|null; purchase_intent_questions?:number|null; compatibility_questions?:number|null; condition_questions?:number|null;
   buy_now_available?:boolean|null; offer_available?:boolean|null; stock_quantity?:number|null; listing_status?:string|null; sold_detected?:boolean|null;
   q_and_a?:any; qa_identity_codes?:any;
+  lifecycle_episode?:number|null;
 };
 
 export type Listing = {
@@ -30,6 +31,8 @@ export type Listing = {
   last_error?:string|null;
   metadata?:any;
   observations?:Obs[];
+  lifecycle_episode?:number|null;
+  lifecycle_state?:string|null;
 };
 
 const clamp=(n:number,min=0,max=100)=>Math.max(min,Math.min(max,n));
@@ -189,7 +192,12 @@ export function comparableKey(listing:Listing){
 }
 
 function baseSignal(listing:Listing){
-  const obs=chronological(listing.observations||[]);
+  const allObs=chronological(listing.observations||[]);
+  const episode=Number(listing.lifecycle_episode||1);
+  // A relist is a fresh measurement episode. Never calculate current velocity/evidence across a
+  // marketplace counter reset (for example 27 views on episode 1 -> 2 views on episode 2).
+  const episodeObs=allObs.filter((o:any)=>Number(o?.lifecycle_episode||1)===episode);
+  const obs=episodeObs.length?episodeObs:allObs;
   const latest=obs[obs.length-1];
   const views=Number(latest?.views ?? 0);
   const watchers=latest?.watchers==null?null:Number(latest.watchers);
@@ -197,11 +205,17 @@ function baseSignal(listing:Listing){
   const currentBid=latest?.current_bid_nzd==null?null:Number(latest.current_bid_nzd);
   const startingPrice=latest?.starting_price_nzd==null?null:Number(latest.starting_price_nzd);
   const independentObs=independentViewObservations(obs);
+  const viewObs=obs.filter((o:any)=>o?.views!=null&&Number.isFinite(Number(o.views)));
+  const lastViewChange=viewObs.length>=2?Number(viewObs[viewObs.length-1].views)-Number(viewObs[viewObs.length-2].views):null;
+  const lastViewChangeHours=viewObs.length>=2?Math.max(0,(Date.parse(String(viewObs[viewObs.length-1].captured_at))-Date.parse(String(viewObs[viewObs.length-2].captured_at)))/3600000):null;
   const recentInfo=independentObs.length>=2?intervalVelocityInfo(independentObs[independentObs.length-2],independentObs[independentObs.length-1]):null;
   const velocity=recentInfo?.velocity??null;
   const priorVelocity=independentObs.length>=3?intervalVelocity(independentObs[independentObs.length-3],independentObs[independentObs.length-2]):null;
   const overallVelocity=listingVelocity(obs);
-  const price=latest?priceOf(latest):null;
+  const latestPricedObs=[...obs].reverse().find((o:any)=>priceOf(o)!=null)||null;
+  const price=latestPricedObs?priceOf(latestPricedObs):null;
+  const priceCapturedAt=latestPricedObs?.captured_at||null;
+  const priceIsLatest=Boolean(latestPricedObs&&latest&&String(latestPricedObs.captured_at)===String(latest.captured_at));
   const observationCount=obs.length;
   const independentObservationCount=independentObs.length;
   const evidence=evidenceScore(listing,obs);
@@ -210,7 +224,7 @@ function baseSignal(listing:Listing){
   const views24h=viewsLast24Hours(obs);
   const evidenceDetailsValue=evidenceDetails(listing,obs);
   const qas=qaSummary(latest);
-  return {obs,latest,views,watchers,bids,currentBid,startingPrice,velocity,priorVelocity,overallVelocity,price,observationCount,independentObservationCount,velocityIntervalHours:recentInfo?.hours??null,velocityTrust:recentInfo?.trust??null,rawRecentVelocity:recentInfo?.rawVelocity??null,evidence,engagement,close,views24h,evidenceDetails:evidenceDetailsValue,qas,soldDetected:Boolean(latest?.sold_detected)};
+  return {obs,latest,views,watchers,bids,currentBid,startingPrice,velocity,priorVelocity,overallVelocity,price,priceCapturedAt,priceIsLatest,observationCount,independentObservationCount,lastViewChange:lastViewChange!=null&&lastViewChange>=0?lastViewChange:null,lastViewChangeHours,velocityIntervalHours:recentInfo?.hours??null,velocityTrust:recentInfo?.trust??null,rawRecentVelocity:recentInfo?.rawVelocity??null,evidence,engagement,close,views24h,evidenceDetails:evidenceDetailsValue,qas,soldDetected:Boolean(latest?.sold_detected)};
 }
 
 export function computeListingSignals(listings:Listing[]){
@@ -273,42 +287,31 @@ export function computeListingSignals(listings:Listing[]){
       else label='LOW SIGNAL';
     }
 
-    const statusPlain=label==='GOOD'?'Strong attention confirmed by repeated evidence':label==='WATCHING'?(earlyStrong?'Strong early signal, but another observation is needed':'Promising, but not strong enough yet'):label==='LOW SIGNAL'?'Enough data, but attention is weak':label==='TOO EARLY'?'Not enough data yet':'Exceptional attention with repeated peer support';
+    const statusPlain=label==='GOOD'?'Repeated marketplace attention is now strong enough to investigate':label==='WATCHING'?'Interest is developing, but COBALT is not ready to recommend sourcing it yet':label==='LOW SIGNAL'?'We have enough checks to see that attention is currently weak':label==='TOO EARLY'?'COBALT needs more checks before judging this listing':'Exceptional marketplace attention with repeated support from similar listings';
     const whyParts:string[]=[];
-    if(label==='TOO EARLY') whyParts.push(`only ${b.independentObservationCount} independent evidence window${b.independentObservationCount===1?'':'s'} so far`);
-    if(b.views24h!=null) whyParts.push(`${b.views24h>=0?'+':''}${b.views24h} views in the last 24h`);
-    else if(b.velocity!=null) whyParts.push(`${b.velocity>=0?'+':''}${b.velocity} views/day recently`);
-    if(b.velocityIntervalHours!=null&&b.velocityIntervalHours<FULL_VELOCITY_TRUST_HOURS) whyParts.push(`recent pace is damped because the latest independent window is only ${round(b.velocityIntervalHours,1)}h`);
-    if(b.velocity!=null&&b.priorVelocity!=null&&b.priorVelocity>0){
-      const ratio=round(b.velocity/b.priorVelocity,1);
-      if(ratio>=1.2)whyParts.push(`attention is accelerating (${ratio}× the previous pace)`);
-      else if(ratio<=.8)whyParts.push(`attention has slowed versus the previous interval`);
-    }
-    if(relativeRatio!=null&&relativeRatio>=1.4) whyParts.push(`moving ${round(relativeRatio,1)}× faster than comparable listings`);
-    if(corroborated) whyParts.push(`corroborated by ${peerPositive} of ${peerGroup.length} comparable listings also gaining views`);
-    else if(earlyStrong) whyParts.push('one strong interval so far; waiting for another observation to confirm it');
-    if(b.close&&b.close.hoursToClose>=0&&b.close.hoursToClose<=72&&b.velocity!=null&&b.velocity>0) whyParts.push(`still attracting views with ${Math.round(b.close.hoursToClose)}h left`);
-    if((b.bids||0)>0) whyParts.push(`${b.bids} bid${b.bids===1?'':'s'} recorded${b.currentBid!=null?` · current bid $${b.currentBid}`:''}`);
+    if((b.lastViewChange??0)>0) whyParts.push(`+${b.lastViewChange} view${b.lastViewChange===1?'':'s'} since the last check`);
+    if(b.views24h!=null&&b.views24h!==0) whyParts.push(`${b.views24h>0?'+':''}${b.views24h} view${Math.abs(b.views24h)===1?'':'s'} in the last 24 hours`);
+    if(corroborated) whyParts.push(`${peerPositive} of ${peerGroup.length} similar listings are also gaining views`);
+    else if(relativeRatio!=null&&relativeRatio>=1.4) whyParts.push(`it is attracting attention faster than most similar listings`);
+    if((b.bids||0)>0) whyParts.push(`${b.bids} bid${b.bids===1?'':'s'} recorded`);
     else if((b.watchers||0)>0) whyParts.push(`${b.watchers} watcher${b.watchers===1?'':'s'} recorded`);
-    if((b.qas?.purchase||0)>0) whyParts.push(`${b.qas.purchase} purchase-intent question${b.qas.purchase===1?'':'s'} detected in public Q&A`);
-    if(b.soldDetected) whyParts.push('Trade Me page explicitly indicates the item sold');
-    if(Number(b.listing.consecutive_failures||0)>0) whyParts.push(`${b.listing.consecutive_failures} recent collection failure${b.listing.consecutive_failures===1?'':'s'} lowers reliability`);
+    if((b.qas?.purchase||0)>0) whyParts.push(`${b.qas.purchase} public question${b.qas.purchase===1?'':'s'} suggesting purchase intent`);
+    if(b.soldDetected) whyParts.push('the marketplace page indicates the item sold');
+    if(label==='TOO EARLY'&&!whyParts.length) whyParts.push(`only ${b.independentObservationCount} reliable check${b.independentObservationCount===1?'':'s'} so far`);
+    if(label==='WATCHING'&&!whyParts.length&&b.velocity!=null) whyParts.push('views are still arriving, but the pattern is not strong enough yet');
+    if(label==='LOW SIGNAL'&&!whyParts.length) whyParts.push('recent checks are not showing much new attention');
+    if(Number(b.listing.consecutive_failures||0)>0) whyParts.push(`collection has failed ${b.listing.consecutive_failures} time${b.listing.consecutive_failures===1?'':'s'} recently`);
+    const plainReason=`${statusPlain}${whyParts.length?`: ${whyParts.slice(0,4).join('; ')}`:''}.`;
     const e=b.evidenceDetails;
-    const confidenceBits=[`${e.count} raw observation${e.count===1?'':'s'}`,`${e.independentCount} independent evidence window${e.independentCount===1?'':'s'}`];
-    if(e.compressedCount>0) confidenceBits.push(`${e.compressedCount} close-together capture${e.compressedCount===1?'':'s'} not counted independently`);
-    if(e.spanHours>=20) confidenceBits.push(`${Math.round(e.spanHours)}h evidence span`);
-    if(e.freshnessHours<=30) confidenceBits.push('recently refreshed');
-    if(e.failures===0) confidenceBits.push('no current collection failures');
-    const confidenceReason=`${round(confidence)}% confidence because we have ${confidenceBits.filter(Boolean).join(', ')}${relativeScore!=null?`, plus comparable-listing context`:''}.`;
-    const plainReason=`${statusPlain}: ${whyParts.slice(0,4).join('; ') || 'waiting for stronger attention evidence'}.`;
+    const confidenceReason=`COBALT has ${e.independentCount} reliable check${e.independentCount===1?'':'s'} across about ${Math.max(1,Math.round(e.spanHours))} hours${e.failures?`, with ${e.failures} recent collection failure${e.failures===1?'':'s'}`:''}.`;
 
     return {
       score:round(attention),confidence:round(confidence),label,
-      price:b.price,views:b.views,views24h:b.views24h,watchers:b.watchers,bids:b.bids,currentBid:b.currentBid,startingPrice:b.startingPrice,
+      price:b.price,priceCapturedAt:b.priceCapturedAt,priceIsLatest:b.priceIsLatest,views:b.views,views24h:b.views24h,watchers:b.watchers,bids:b.bids,currentBid:b.currentBid,startingPrice:b.startingPrice,
       velocity:b.velocity,overallVelocity:b.overallVelocity,previousVelocity:b.priorVelocity,
       accelerationScore:aScore,closeScore,hoursToClose:b.close?.hoursToClose??null,closeDate:b.close?.closeDate??null,
       relativeVelocity:relativeRatio==null?null:round(relativeRatio,2),peerMedianVelocity:peerMedian==null?null:round(peerMedian,2),peerCount:peerGroup.length,peerPositive,peerPositiveShare:round(peerPositiveShare,2),corroborated,
-      observationCount:b.observationCount,independentObservationCount:b.independentObservationCount,compressedObservationCount:b.evidenceDetails.compressedCount,velocityIntervalHours:b.velocityIntervalHours,velocityTrust:b.velocityTrust,rawRecentVelocity:b.rawRecentVelocity,evidenceScore:round(b.evidence),engagementScore:b.engagement==null?null:round(b.engagement),questionCount:b.qas?.total||0,purchaseIntentQuestions:b.qas?.purchase||0,compatibilityQuestions:b.qas?.compatibility||0,conditionQuestions:b.qas?.condition||0,qaIdentityCodes:b.qas?.identityCodes||[],soldDetected:b.soldDetected,
+      observationCount:b.observationCount,independentObservationCount:b.independentObservationCount,compressedObservationCount:b.evidenceDetails.compressedCount,lastViewChange:b.lastViewChange,lastViewChangeHours:b.lastViewChangeHours,velocityIntervalHours:b.velocityIntervalHours,velocityTrust:b.velocityTrust,rawRecentVelocity:b.rawRecentVelocity,evidenceScore:round(b.evidence),engagementScore:b.engagement==null?null:round(b.engagement),questionCount:b.qas?.total||0,purchaseIntentQuestions:b.qas?.purchase||0,compatibilityQuestions:b.qas?.compatibility||0,conditionQuestions:b.qas?.condition||0,qaIdentityCodes:b.qas?.identityCodes||[],soldDetected:b.soldDetected,
       reason:plainReason,confidenceReason,
       components:Object.fromEntries(usable.map(([name,,score])=>[name,round(score)]))
     };

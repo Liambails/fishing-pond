@@ -17,29 +17,37 @@ function quarantineUnsafeViews(raw:any){
   const source=String(raw?._sources?.views?.source||raw?.raw_sources_json?.views?.source||'unknown');
   return {...raw,views:null,extraction_quality:{...(raw?.extraction_quality||{}),warnings:[...new Set([...(raw?.extraction_quality?.warnings||[]),'unsafe_view_source'])]},_view_guard:{quarantined:true,source,reason:'whole-page view fallback is not trusted'}};
 }
+function effectiveEnded(raw:any){
+  if(Boolean(raw?.listing_ended))return true;
+  const close=normalizeMarketplaceCloseDate(raw?.close_date);
+  if(!close)return false;
+  const t=Date.parse(close);
+  return Number.isFinite(t)&&t<=Date.now()-2*60_000;
+}
+
 function activity(rows:any[]){
   const a=[...rows].filter(x=>x.captured_at).sort((x,y)=>Date.parse(x.captured_at)-Date.parse(y.captured_at));
-  if(!a.length)return {observation_count:0,span_hours:0,views_per_day:null,view_delta:null,bid_delta:null,watcher_delta:null};
+  if(!a.length)return {observation_count:0,span_hours:0,views_per_day:null,view_delta:null,bid_delta:null,watcher_delta:null,independent_intervals:[],recent_view_gains:[]};
   const f=a[0],l=a[a.length-1],span=Math.max(0,(Date.parse(l.captured_at)-Date.parse(f.captured_at))/3600000);
   const delta=(x:any,y:any)=>x==null||y==null?null:Number(y)-Number(x);
   const vd=delta(f.views,l.views),bd=delta(f.bids,l.bids),wd=delta(f.watchers,l.watchers);
-  return {observation_count:a.length,span_hours:Number(span.toFixed(2)),views_per_day:vd!=null&&span>=1?Number((vd/span*24).toFixed(2)):null,view_delta:vd,bid_delta:bd,watcher_delta:wd,latest_views:l.views,latest_bids:l.bids,latest_watchers:l.watchers};
+  const independent:any[]=[];
+  for(const row of a){if(row.views==null)continue;if(!independent.length){independent.push(row);continue;}const gap=(Date.parse(row.captured_at)-Date.parse(independent[independent.length-1].captured_at))/3600000;if(gap>=3)independent.push(row);else independent[independent.length-1]=row;}
+  const intervals=independent.slice(1).map((row,i)=>{const prev=independent[i];const hours=Math.max(0,(Date.parse(row.captured_at)-Date.parse(prev.captured_at))/3600000);const gain=Math.max(0,Number(row.views)-Number(prev.views));return {hours:Number(hours.toFixed(2)),gain};});
+  const recent=intervals.slice(-2);
+  return {observation_count:a.length,span_hours:Number(span.toFixed(2)),views_per_day:vd!=null&&vd>=0&&span>=1?Number((vd/span*24).toFixed(2)):null,view_delta:vd!=null&&vd>=0?vd:null,bid_delta:bd,watcher_delta:wd,latest_views:l.views,latest_bids:l.bids,latest_watchers:l.watchers,independent_count:independent.length,independent_intervals:intervals,recent_view_gains:recent.map(x=>x.gain)};
 }
 function cadence(listing:any,rows:any[]){
   const a=activity(rows),own=String(listing?.metadata?.ownership||'').toLowerCase()==='own';
-
-  // Initial learning ladder: capture #1 -> +6h -> #2 -> +6h -> #3 -> +12h -> #4.
-  // This establishes early velocity and persistence before mature adaptive scheduling.
-  if(a.observation_count<=1)return {hours:6,reason:'learning phase · second observation',evidence:a};
-  if(a.observation_count===2)return {hours:6,reason:'learning phase · confirm early velocity',evidence:a};
-  if(a.observation_count===3)return {hours:12,reason:'learning phase · establish first-day persistence',evidence:a};
-
-  // Mature adaptive cadence. Raw view totals alone never determine performance.
-  const v=a.views_per_day||0,b=a.bid_delta||0,w=a.watcher_delta||0;
-  if(v>=12||b>=2)return {hours:6,reason:'high sustained view/bid activity',evidence:a};
-  if(v>=6||b>=1||w>=2)return {hours:8,reason:'strong sustained activity',evidence:a};
-  if(v>=2||w>=1||own)return {hours:12,reason:own?'own listing tracking':'active listing',evidence:a};
-  return {hours:24,reason:'low recent activity',evidence:a};
+  const gains=(a.recent_view_gains||[]) as number[];const last=gains.length?gains[gains.length-1]:0;const prior=gains.length>=2?gains[gains.length-2]:0;const two=gains.length>=2;
+  const b=Math.max(0,Number(a.bid_delta||0)),w=Math.max(0,Number(a.watcher_delta||0));
+  if(Number(a.independent_count||0)<=1)return {hours:6,reason:'learning · establish a second reliable check',evidence:a};
+  if(Number(a.independent_count||0)===2)return {hours:last>=4?3:6,reason:last>=4?'heating up · strong gain in the latest reliable window':'learning · confirm the early pattern',evidence:a};
+  if((two&&last>=3&&prior>=3)||(last>=5&&b>=1)||b>=2)return {hours:3,reason:'hot · repeated strong gains across reliable checks',evidence:a};
+  if((two&&last+prior>=4&&last>=1&&prior>=1)||last>=3||b>=1||w>=2)return {hours:6,reason:'warm · sustained marketplace attention',evidence:a};
+  if(last>=1||own)return {hours:12,reason:own?'normal · own listing tracking':'normal · some recent movement',evidence:a};
+  if(two&&last===0&&prior===0)return {hours:24,reason:'cold · no new views across two reliable checks',evidence:a};
+  return {hours:12,reason:'normal · waiting for a clearer pattern',evidence:a};
 }
 
 const REQUIRED_CAPTURE_WARNINGS = new Set(['missing_listing_id','missing_title','missing_price','missing_views','missing_seller','missing_description']);
@@ -140,6 +148,11 @@ export async function POST(req: Request) {
   const db=adminClient();
   const capturedAt=asIso(raw.captured_at) ?? new Date().toISOString();
   const {data:existing}=await db.from('listings').select('*').eq('marketplace',identity.marketplace).eq('listing_id',identity.listingId).maybeSingle();
+  const isEnded=effectiveEnded(raw);
+  const wasClosedState=Boolean(existing&&['relist_watch','terminal_closed','relisted'].includes(String(existing.lifecycle_state||'')));
+  const reopeningSameId=Boolean(existing&&wasClosedState&&!isEnded);
+  const targetEpisode=Number(existing?.lifecycle_episode||1)+(reopeningSameId?1:0);
+  const normalizedCloseDate=normalizeMarketplaceCloseDate(raw.close_date);
   const quality=captureQuality({...raw,listing_id:identity.listingId});
   let previouslyComplete=metadataCaptureComplete(existing?.metadata);
   if(existing&&!previouslyComplete){
@@ -168,7 +181,7 @@ export async function POST(req: Request) {
   }
   const listingPayload:any={
     marketplace:identity.marketplace,listing_id:identity.listingId,url:identity.canonicalUrl,source_url:raw.source_url||raw.url,
-    title:raw.listing_title||existing?.title||null,seller:raw.seller||existing?.seller||null,active:raw.listing_ended?false:true,
+    title:raw.listing_title||existing?.title||null,seller:raw.seller||existing?.seller||null,active:!isEnded,
     last_seen:capturedAt,last_observed_at:capturedAt,metadata
   };
   const {data:listing,error:upErr}=await db.from('listings').upsert(listingPayload,{onConflict:'marketplace,listing_id'}).select('*').single();
@@ -176,9 +189,9 @@ export async function POST(req: Request) {
 
   const q=raw.extraction_quality||{};
   const observation:any={
-    listing_uuid:listing.id,captured_at:capturedAt,lifecycle_episode:Number(existing?.lifecycle_episode||listing?.lifecycle_episode||1),collector_version:raw.collector_version||null,listing_mode:raw.listing_mode||null,
+    listing_uuid:listing.id,captured_at:capturedAt,lifecycle_episode:targetEpisode,collector_version:raw.collector_version||null,listing_mode:raw.listing_mode||null,
     buy_now_nzd:asNum(raw.buy_now_nzd),asking_price_nzd:asNum(raw.asking_price_nzd),starting_price_nzd:asNum(raw.starting_price_nzd),current_bid_nzd:asNum(raw.current_bid_nzd),
-    views:asNum(raw.views),watchers:asNum(raw.watchers),bids:asNum(raw.bids),close_date:normalizeMarketplaceCloseDate(raw.close_date),close_remaining:raw.close_remaining||null,
+    views:asNum(raw.views),watchers:asNum(raw.watchers),bids:asNum(raw.bids),close_date:normalizedCloseDate,close_remaining:raw.close_remaining||null,
     question_count:asNum(raw.question_count),purchase_intent_questions:asNum(raw.purchase_intent_questions),compatibility_questions:asNum(raw.compatibility_questions),condition_questions:asNum(raw.condition_questions),
     q_and_a:Array.isArray(raw.q_and_a)?raw.q_and_a:null,qa_identity_codes:Array.isArray(raw.qa_identity_codes)?raw.qa_identity_codes:null,
     buy_now_available:raw.buy_now_available??null,offer_available:raw.offer_available??null,stock_quantity:asNum(raw.stock_quantity),listing_status:raw.listing_status||null,sold_detected:raw.sold_detected??null,
@@ -199,11 +212,15 @@ export async function POST(req: Request) {
   const latestAt=latestObservation?.captured_at?Date.parse(latestObservation.captured_at):NaN;
   const currentAt=Date.parse(capturedAt);
   const sameSourceKind=latestObservation?captureSourceKind(latestObservation.raw_snapshot?.capture_source)===captureSourceKind(raw.capture_source):false;
-  const sameEndedState=latestObservation?Boolean(latestObservation.raw_snapshot?.listing_ended)===Boolean(raw.listing_ended):false;
+  const sameEndedState=latestObservation?effectiveEnded(latestObservation.raw_snapshot||latestObservation)===isEnded:false;
+  const sameLifecycleEpisode=latestObservation?Number(latestObservation.lifecycle_episode||1)===targetEpisode:false;
   const withinEpisode=Number.isFinite(latestAt)&&Number.isFinite(currentAt)&&currentAt>=latestAt&&(currentAt-latestAt)<=MANUAL_CAPTURE_EPISODE_MS;
-  const canCoalesce=Boolean(latestObservation&&quality.complete&&sameSourceKind&&sameEndedState&&withinEpisode);
+  const canCoalesce=Boolean(latestObservation&&quality.complete&&sameSourceKind&&sameEndedState&&sameLifecycleEpisode&&withinEpisode);
 
-  if(canCoalesce){
+  const repeatedClosedProbe=Boolean(isEnded&&existing&&wasClosedState);
+  if(repeatedClosedProbe){
+    observationEpisodeCount=0;
+  }else if(canCoalesce){
     const previousEpisode=latestObservation.raw_snapshot?._capture_episode||{};
     const previousSamples=Array.isArray(previousEpisode.samples)?previousEpisode.samples:[];
     const firstCapturedAt=previousEpisode.first_captured_at||latestObservation.captured_at;
@@ -220,21 +237,24 @@ export async function POST(req: Request) {
     const {error:obsErr}=await db.from('observations').upsert(observation,{onConflict:'listing_uuid,captured_at'});
     if(obsErr)return json({ok:false,error:obsErr.message},{status:500});
   }
-  const {data:history}=await db.from('observations').select('captured_at,views,watchers,bids').eq('listing_uuid',listing.id).order('captured_at',{ascending:false}).limit(12);
+  const {data:history}=await db.from('observations').select('captured_at,views,watchers,bids,lifecycle_episode').eq('listing_uuid',listing.id).eq('lifecycle_episode',targetEpisode).order('captured_at',{ascending:false}).limit(12);
 
-  const isEnded=Boolean(raw.listing_ended); let next:string|null=null; let interval:number|null=null; let cadenceReason='listing finalized'; let finalVerdict:string|null=null;
+  let next:string|null=null; let interval:number|null=null; let cadenceReason='listing finalized'; let finalVerdict:string|null=null;
   if(isEnded){
-    const reason=String(raw.listing_end_reason||'ended'); const f=finalise(history||[],reason); finalVerdict=f.verdict;
-    const relistNext=new Date(Date.now()+6*3600_000).toISOString(); const watchUntil=new Date(Date.now()+7*86400_000).toISOString();
-    await db.from('listings').update({active:false,lifecycle_state:'relist_watch',next_observation_at:relistNext,relist_check_count:0,relist_watch_until:watchUntil,finalized_at:capturedAt,final_verdict:f.verdict,final_score:f.score,final_evidence:f.evidence,closure_reason:reason,cadence_reason:'closed · relist check in 6h',consecutive_failures:0,last_error:null,last_success_source:String(raw.capture_source||'extension-manual')}).eq('id',listing.id);
-    await db.from('listing_lifecycle_events').insert({listing_uuid:listing.id,listing_family_id:listing.listing_family_id||listing.id,marketplace:listing.marketplace,marketplace_listing_id:listing.listing_id,episode:Number(listing.lifecycle_episode||1),event_type:'closed_relist_watch',occurred_at:capturedAt,reason:{closure_reason:reason,next_check:relistNext}});
+    const reason=String(raw.listing_end_reason||(normalizedCloseDate?'expired':'ended')); const f=finalise(history||[],reason); finalVerdict=f.verdict;
+    const firstTransition=!wasClosedState;
+    const checkCount=firstTransition?0:Number(existing?.relist_check_count||0);
+    const relistNext=new Date(Date.now()+(firstTransition?1:6)*3600_000).toISOString(); const watchUntil=existing?.relist_watch_until||new Date(Date.now()+10*86400_000).toISOString();
+    await db.from('listings').update({active:false,lifecycle_state:'relist_watch',next_observation_at:relistNext,relist_check_count:checkCount,relist_watch_until:watchUntil,last_relist_checked_at:firstTransition?null:capturedAt,finalized_at:existing?.finalized_at||capturedAt,final_verdict:f.verdict,final_score:f.score,final_evidence:f.evidence,closure_reason:reason,cadence_reason:firstTransition?'ended · first relist check in 1h':'ended · relist watch continues',consecutive_failures:0,last_error:null,last_success_source:String(raw.capture_source||'extension-manual')}).eq('id',listing.id);
+    if(firstTransition)await db.from('listing_lifecycle_events').insert({listing_uuid:listing.id,listing_family_id:listing.listing_family_id||listing.id,marketplace:listing.marketplace,marketplace_listing_id:listing.listing_id,episode:targetEpisode,event_type:'closed_relist_watch',occurred_at:capturedAt,reason:{closure_reason:reason,next_check:relistNext,effective_end_from_close_date:!Boolean(raw.listing_ended)}});
   }else{
-    const c=cadence(listing,history||[]); interval=c.hours; cadenceReason=c.reason; next=new Date(Date.now()+c.hours*3600_000).toISOString();
-    const own=String(listing?.metadata?.ownership||'').toLowerCase()==='own';
-    const priority=own?95:(c.hours<=6?88:c.hours<=8?80:c.hours<=12?68:50);
-    const wasRelistWatch=existing?.lifecycle_state==='relist_watch'; const episode=wasRelistWatch?Number(existing?.lifecycle_episode||1)+1:Number(existing?.lifecycle_episode||listing?.lifecycle_episode||1);
-    await db.from('listings').update({active:true,lifecycle_state:'active',lifecycle_episode:episode,next_observation_at:next,observation_interval_hours:c.hours,priority,cadence_reason:wasRelistWatch?'relisted · same marketplace ID':c.reason,consecutive_failures:0,last_error:null,last_success_source:String(raw.capture_source||'extension-manual'),finalized_at:null,final_verdict:null,final_score:null,final_evidence:{},closure_reason:null,relist_check_count:0,relist_watch_until:null,last_relisted_at:wasRelistWatch?capturedAt:(existing?.last_relisted_at||null)}).eq('id',listing.id);
-    if(wasRelistWatch)await db.from('listing_lifecycle_events').insert({listing_uuid:listing.id,listing_family_id:existing?.listing_family_id||listing.id,marketplace:listing.marketplace,marketplace_listing_id:listing.listing_id,episode,event_type:'relisted_same_id',occurred_at:capturedAt,confidence:1,reason:{detected:'previously closed URL is active again'}});
+    const c=cadence(listing,history||[]); interval=c.hours; cadenceReason=c.reason;
+    let nextMs=Date.now()+c.hours*3600_000;
+    if(normalizedCloseDate){const closeMs=Date.parse(normalizedCloseDate)+10*60_000;if(Number.isFinite(closeMs)&&closeMs>Date.now()&&closeMs<nextMs){nextMs=closeMs;cadenceReason=`${cadenceReason} · closure check shortly after expiry`;}}
+    next=new Date(nextMs).toISOString();
+    const own=String(listing?.metadata?.ownership||'').toLowerCase()==='own'; const priority=own?95:(c.hours<=3?92:c.hours<=6?88:c.hours<=12?68:50);
+    await db.from('listings').update({active:true,lifecycle_state:'active',lifecycle_episode:targetEpisode,next_observation_at:next,observation_interval_hours:c.hours,priority,cadence_reason:reopeningSameId?'relisted · same marketplace ID · new episode':c.reason,consecutive_failures:0,last_error:null,last_success_source:String(raw.capture_source||'extension-manual'),finalized_at:null,final_verdict:null,final_score:null,final_evidence:{},closure_reason:null,relist_check_count:0,relist_watch_until:null,last_relisted_at:reopeningSameId?capturedAt:(existing?.last_relisted_at||null),relist_match_confidence:reopeningSameId?1:(existing?.relist_match_confidence||null),relist_detection_method:reopeningSameId?'same_marketplace_id_reopened':(existing?.relist_detection_method||null)}).eq('id',listing.id);
+    if(reopeningSameId)await db.from('listing_lifecycle_events').insert({listing_uuid:listing.id,listing_family_id:existing?.listing_family_id||listing.id,marketplace:listing.marketplace,marketplace_listing_id:listing.listing_id,episode:targetEpisode,event_type:'relisted_same_id',occurred_at:capturedAt,confidence:1,reason:{detected:'previously closed marketplace ID is live again',counter_reset_is_new_episode:true}});
   }
 
   // A successful manual capture is explicit recovery evidence for previous collection failures on this canonical listing.
@@ -248,5 +268,5 @@ export async function POST(req: Request) {
   let comparableMatch={autoLinked:0,review:0};
   try{comparableMatch=await matchListingIncrementally(db,{...listing,metadata},{...observation,raw_snapshot:raw})}catch(e){console.error('Comparable matcher failed',e)}
 
-  return json({ok:true,marketplace:identity.marketplace,listing_id:identity.listingId,continued:Boolean(existing),already_saved:previouslyComplete,capture_complete:captureComplete,capture_warnings:captureComplete?[]:quality.warnings,observation_saved:true,observation_coalesced:observationCoalesced,observation_episode_count:observationEpisodeCount,next_observation_at:next,observation_interval_hours:interval,cadence_reason:cadenceReason,final_verdict:finalVerdict,relist_match:relistMatch,comparable_match:comparableMatch});
+  return json({ok:true,marketplace:identity.marketplace,listing_id:identity.listingId,continued:Boolean(existing),already_saved:previouslyComplete,capture_complete:captureComplete,capture_warnings:captureComplete?[]:quality.warnings,observation_saved:!repeatedClosedProbe,observation_coalesced:observationCoalesced,observation_episode_count:observationEpisodeCount,next_observation_at:next,observation_interval_hours:interval,cadence_reason:cadenceReason,final_verdict:finalVerdict,relist_match:relistMatch,comparable_match:comparableMatch});
 }

@@ -7,7 +7,7 @@ For scheduler/collection incidents, identify the **first failed stage**. Do not 
 Expected automatic path:
 
 ```text
-GitHub scheduled wake
+AWS EventBridge (10m) -> Lambda -> GitHub workflow_dispatch
   -> scheduler heartbeat
   -> Python dependency bootstrap
   -> due preflight
@@ -151,7 +151,7 @@ When an API error says a column is missing from the PostgREST schema cache:
 NOTIFY pgrst, 'reload schema';
 ```
 
-Current V3.9.11 requires migrations through `012_structured_comparable_identity.sql`; V3.9.9–V3.9.11 add no new schema migrations.
+V3.9.19 requires migrations through `017_relist_lineage_hardening.sql`. Apply migration 017 before deploying code that reads/writes relist successor or detection fields.
 
 ## Local build/deployment checks
 
@@ -180,7 +180,7 @@ When COBALT version changes, update version references in the same commit. At mi
 - `web/package.json`;
 - dashboard-visible version text;
 - `/api/health`;
-- `.github/workflows/observe.yml` `COBALT_VERSION`;
+- `.github/workflows/observe.yml` (version is derived from `web/package.json`; do not reintroduce a hard-coded `COBALT_VERSION`);
 - scheduler telemetry fallback/default version;
 - matcher version when the matcher itself changes;
 - docs current-release references.
@@ -217,7 +217,7 @@ Do not merge view counters across episodes blindly. A reset can be legitimate af
 
 ## Explicit relist successor flow (V3.9.7)
 
-When a confirmed closed listing page contains an ordinary link labelled as a relist/new listing, the worker validates the destination. Direct listing URLs are registered immediately; safe same-marketplace semantic redirect links are followed by ordinary Chromium navigation and the final URL/collector listing ID must prove a different Trade Me listing before lineage is created. The old listing becomes `terminal_closed`; the successor inherits the listing family/product relationship and receives one immediate normal collection attempt.
+When a confirmed closed listing page exposes a relist/new-listing link, the worker validates the destination. An old URL that resolves to a different marketplace listing ID is deterministic redirect evidence; an explicit marketplace successor link is also deterministic lineage evidence. The parent is finalized and marked `relisted`, the successor inherits the family/product relationship, and the successor starts a fresh lifecycle episode with its own counters.
 
 If the successor destination presents CAPTCHA, Access Denied, Verify you are human, or Unusual traffic, COBALT stops. The successor's automatic schedule is paused (`next_observation_at = null`) and an open `collection_errors` issue is created. Recover by opening the successor URL in the normal browser, completing any marketplace verification, and using `COBALT · Capture`. A successful manual capture resolves the issue and returns that successor to normal scheduling. COBALT does not rotate proxies, spoof fingerprints, or bypass verification.
 
@@ -251,7 +251,7 @@ observation_queue_status: active | promoted | dismissed
 observation_queue_decided_at: ISO timestamp or null
 ```
 
-`PATCH /api/observation-queue` accepts selected listing IDs plus `dismiss` or `restore`. Rows already linked to a Product are skipped rather than being restored/dismissed. Product creation and auto-promotion set `product_id` and mark the listing promoted.
+`PATCH /api/observation-queue` accepts selected listing IDs plus `dismiss` or `restore`. Rows already linked to a Product are skipped rather than being restored/dismissed. Explicit Product creation sets `product_id` and marks the listing promoted. The legacy `/api/products/auto-promote` route is non-mutating/disabled so old clients cannot silently create commercial Products.
 
 If a promoted listing appears in Active, first confirm the dashboard received the current `product_id`/metadata values and that the V3.9.11 web deployment is active. If a dismissed listing seems missing, switch Status to `Dismissed` or `All`; dismissal intentionally preserves the listing and observations while removing it from unresolved work.
 
@@ -271,3 +271,57 @@ The production schedule is AWS EventBridge Scheduler -> Lambda -> GitHub `workfl
 `dispatch_guard.py` executes before pip. If another `workflow_dispatch` scheduler heartbeat began within the previous 8 minutes, the job is treated as a duplicate delivery and skips telemetry, dependency installation, due checking, Chromium and collection. This makes scheduler retries cheap and idempotent while preserving the next genuine 10-minute tick.
 
 If the dashboard reports no scheduler heartbeat for more than one expected interval, check EventBridge schedule state, Lambda CloudWatch logs and GitHub Actions dispatches in that order.
+
+
+## V3.9.19 relist validation and recovery
+
+### Apply migration 017 first
+
+Run `supabase/migrations/017_relist_lineage_hardening.sql`, then reload the PostgREST schema if necessary. V3.9.19 code writes the new relist detection/lineage columns.
+
+### Repair active rows whose known expiry already passed
+
+Dry run:
+
+```bash
+cd ~/cobalt
+python3 worker/reseed_expired_due.py
+```
+
+After reviewing the listing IDs:
+
+```bash
+python3 worker/reseed_expired_due.py --apply
+```
+
+This does **not** declare rows ended from the clock alone; it merely makes them due immediately so the normal worker can confirm closure/relist state.
+
+### Probe a known relist
+
+```bash
+python3 worker/recheck_relist.py 6110749863
+```
+
+If the old page does not expose/redirect to the successor, provide the known candidate to validate the fallback matcher:
+
+```bash
+python3 worker/recheck_relist.py 6110749863 \
+  --candidate-url https://www.trademe.co.nz/a/motors/car-parts-accessories/toyota/electrics/listing/6121769780
+```
+
+Both commands are dry-run by default. Only after the output confirms lineage should `--apply` be used. A deterministic redirect/explicit marketplace link is recorded with confidence `1.0`; a semantic matcher score must not be interpreted as an empirical percent chance of correctness. CAPTCHA/access-verification is never bypassed.
+
+### Verify lineage in SQL
+
+```sql
+select listing_id, lifecycle_state, lifecycle_episode, relisted_from,
+       relist_successor_uuid, relist_detection_method, relist_match_confidence,
+       finalized_at, last_relisted_at, last_relist_checked_at
+from public.listings
+where listing_id in ('6110749863','6121769780');
+
+select marketplace_listing_id, episode, event_type, previous_listing_uuid, confidence, occurred_at, reason
+from public.listing_lifecycle_events
+where marketplace_listing_id in ('6110749863','6121769780')
+order by occurred_at;
+```

@@ -1,3 +1,38 @@
+# V3.9.19 — Relist Lineage + Historical Evidence
+
+- Ended/expired listings are historical evidence, not active research work. The default Observation Queue excludes `relist_watch`, `terminal_closed` and `relisted` rows; an **Ended / expired** filter keeps them available without allowing them to dominate active sorting.
+- A known `close_date` now caps the next normal observation at roughly **10 minutes after expiry** when that is sooner than the normal 3h/6h/12h/24h cadence. This closes the gap where the dashboard could visually say Ended while the database still considered the listing active for hours.
+- Closed listings enter a bounded, multi-check relist watch. Normal watch delays are approximately **1h, 6h, 18h, 48h and 96h**, with a ten-day maximum watch window. Worker capacity reserves a small slice for due relist probes so a large live-listing backlog cannot starve lifecycle checks.
+- Relist discovery now uses several independent evidence paths: same marketplace ID reopening; old URL resolving to a different listing ID; marketplace-explicit relist/new-listing links; ended-page successor candidates; and a conservative category-agnostic semantic fallback.
+- Deterministic marketplace redirect/explicit-link/same-ID evidence is recorded with lineage confidence `1.0`. Semantic scores are matcher scores, **not calibrated probabilities**. Semantic auto-linking requires strong same-seller/product evidence and refuses a link when the runner-up is within an ambiguity margin.
+- New-ID relists remain separate canonical marketplace listing rows but share `listing_family_id`, link through `relisted_from`/`relist_successor_uuid`, and increment `lifecycle_episode`. Same-ID resurrection increments the episode on the same row.
+- Observation counters are scoped to the current lifecycle episode. A relist reset such as `27 views -> 2 views` starts a fresh episode and never becomes a negative demand delta. Historical episodes remain available as product-family evidence.
+- Parent episodes are finalized when a successor is discovered, including redirect cases where a dedicated post-close parent capture never occurred.
+- Opportunity generation requires current live evidence. A recently ended listing can support a live product-family lead with recency decay (full support for <=7 days, reduced support through 30 days); an ended-only family cannot create a new active Opportunity.
+- Added `worker/recheck_relist.py` for dry-run/live-browser validation of a specific ended listing and optional candidate successor. Added `worker/reseed_expired_due.py` to make currently active rows with already-passed close dates immediately due for confirmation without blindly declaring them ended.
+- Added migration `017_relist_lineage_hardening.sql` with `relist_successor_uuid`, `relist_match_confidence`, `relist_detection_method` and `last_relist_checked_at`.
+- Added relist matcher regressions, explicit-link regressions and lifecycle-episode reset regression. The known real-world regression fixture is Trade Me `6110749863 -> 6121769780`.
+- Performed a pre-scale pass before larger data collection: dashboard observation grouping and Opportunity observation grouping now use indexed in-memory maps rather than repeatedly filtering the full observation array per listing.
+- Removed the previous 250-listing dashboard / 500-listing Opportunity-scan ceilings. Core dashboard and Opportunity datasets now use paged PostgREST reads with explicit safety ceilings, preventing silent server-row-cap truncation as COBALT grows past the first few hundred listings.
+- The legacy `/api/products/auto-promote` endpoint is now a non-mutating `410` tombstone so no stale client/job can bypass the operator-controlled Opportunities -> My Products workflow.
+- Version surfaces are synchronized: package version is V3.9.19, document `<title>` and header derive from `web/package.json`, `/api/health` derives from the package version, and the extension manifest is V3.9.19.
+
+# V3.9.18 — Sourcing-First Opportunities + Frictionless Tables
+
+- Reframed COBALT around a clearer workflow: Observation Queue is the research ledger; Opportunities is the sourcing-decision inbox; My Products is entered only after an operator chooses to investigate/source. Removed automatic MUST_HAVE promotion into My Products.
+- Opportunity detection is intentionally more proactive because an Opportunity is a research lead, not a stock-purchase instruction. Category-agnostic family clustering can surface an early lead from two or more related listings showing sustained movement, while stronger stages require deeper cross-listing evidence.
+- Added user-facing sourcing stages stored inside opportunity metrics: `EARLY_LEAD`, `STRONG_LEAD`, and `SOURCE_NOW`. Existing database `signal_strength` values remain backward-compatible, so no migration is required.
+- Standalone sourcing leads may now surface after 3 independent checks when sustained attention is meaningful; stronger standalone stages still require deeper time coverage and stronger behaviour. This keeps rare products discoverable without pretending one listing proves a market.
+- Opportunity reasons and notifications are plain English: actual view changes, 24-hour movement, number of similar listings moving, price range, bids, purchase-intent questions, and sold confirmations. Internal confidence/evidence mechanics are no longer the primary user-facing explanation.
+- Observation Queue `Why` copy now prioritizes actual views since the last check and views gained in the last 24 hours. The 99%-style evidence-confidence line is removed from the primary Signal/Why UI.
+- Renamed user-facing `Velocity` to **Current pace**. The info tooltip explains the simple extrapolation (`views gained ÷ elapsed hours × 24`) and makes clear that the estimate is not an actual 24-hour view count.
+- Replaced the large `OPPORTUNITIES [N]` text control with a conventional bell icon and unread-count badge. Added a Sourcing leads overview metric.
+- The displayed COBALT version is now read from `web/package.json`, removing hard-coded header version drift.
+- Rebuilt table interaction to avoid JavaScript wheel interception entirely. Locked tables use CSS clipping so wheel/trackpad events continue naturally to the page with no `preventDefault`, `scrollBy`, or wheel-time work. Hover shows a faint “Click to enable table scrolling” overlay; clicking activates that table until the user clicks outside it. History popovers are also disabled while a table is locked and use a short hover-intent delay once active, preventing portal churn while the cursor simply passes over rows during page scrolling.
+- Sticky column headers are enforced across every independently scrollable COBALT table surface.
+- Removed the permanent Observation Queue action gutter. The three-dot control now floats over the natural right edge of the row on hover/focus (always visible on touch), with COBALT-native menu styling.
+- No database migration required.
+
 ## V3.9.17 — Observation Queue Controls + Interest Suppression
 
 - Observation Queue rows now have a sticky right-side action menu. Desktop shows the control on row hover/focus; touch/mobile keeps it visible. The final data column is padded so the sticky control never covers table content.
@@ -193,3 +228,12 @@ V3.9.12 adds a durable cross-listing opportunity layer above the Observation Que
 - The existing internal Observation Queue state `promoted` is now labelled **In My Products** in the UI. It means the research listing has already been used to create/link a My Product; it is not a quality or demand judgement.
 - The observer workflow scans opportunity signals after successful collection runs so new patterns can be detected even when the dashboard is not open.
 - Added additive migration `013_opportunity_signals.sql` with `opportunities`, `opportunity_listings`, and `opportunity_notifications`.
+
+
+### V3.9.18 final cadence / pricing clarification
+- Observation cadence now heats and cools on real view gains across independent (>=3h) checks: Hot 3h, Warm 6h, Normal 12h, Cold 24h.
+- Missing marketplace price does **not** invalidate demand evidence. A listing can be GOOD or support an Opportunity from view/bid/buyer-intent evidence even when no price is exposed.
+- Missing prices are never converted to zero and are excluded from opportunity price ranges and product suggested-price benchmarks. Opportunities disclose partial/no price coverage explicitly.
+- Opportunity scans return a compact audit of the strongest qualified families/standalone leads so production scans can be inspected instead of silently waiting.
+- Locked tables are covered by a single full-surface interaction gate; child hover/click behavior is disabled until activation, and row actions are anchored to the visible right edge during horizontal scrolling.
+- A transient missing price no longer erases previously captured price evidence: the queue and opportunity pricing use the most recent known non-null marketplace price and mark it as carried forward when the newest capture omits price.

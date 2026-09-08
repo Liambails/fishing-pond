@@ -1,34 +1,24 @@
 # COBALT documentation
 
-This directory is the maintained documentation set for COBALT. The repository root README is intentionally short; detailed operational and engineering knowledge lives here.
+This directory is the maintained documentation set for COBALT. There is intentionally no maintained root README; operational and engineering knowledge lives under `/docs`.
+
+Current release: **V3.9.19 — Relist Lineage + Historical Evidence**.
 
 ## Start here
 
-- [`SYSTEM_OVERVIEW.md`](SYSTEM_OVERVIEW.md) — what COBALT is, the complete data flow, repository layout, database model, lifecycle, deployment model, and current V3.9.11 capabilities.
-- [`ALGORITHMS_AND_FORMULAS.md`](ALGORITHMS_AND_FORMULAS.md) — deterministic scoring, cadence, comparable matching, cosine similarity, similarity-weighted pricing, relist matching, and decision thresholds.
-- [`OPERATIONS_AND_TROUBLESHOOTING.md`](OPERATIONS_AND_TROUBLESHOOTING.md) — scheduler observability, common failure modes, debugging sequence, logs, health checks, and recovery procedures.
-- [`SETUP.md`](SETUP.md) — first-time local/Supabase/Vercel/GitHub/extension setup.
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — compact architecture reference.
+- [`SYSTEM_OVERVIEW.md`](SYSTEM_OVERVIEW.md) — end-to-end collection, observation, lifecycle, Opportunity and deployment model.
+- [`ALGORITHMS_AND_FORMULAS.md`](ALGORITHMS_AND_FORMULAS.md) — scoring, evidence windows, adaptive cadence, relist matching, opportunity thresholds and pricing rules.
+- [`OPERATIONS_AND_TROUBLESHOOTING.md`](OPERATIONS_AND_TROUBLESHOOTING.md) — production checks, scheduler/relist diagnostics and recovery commands.
+- [`SETUP.md`](SETUP.md) — local/Supabase/Vercel/GitHub/extension setup and required migrations.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — compact component and data-flow reference.
+- [`RELEASE_HISTORY.md`](RELEASE_HISTORY.md) — chronological release notes.
+
+## V3.9.19 deployment requirement
+
+Apply `supabase/migrations/017_relist_lineage_hardening.sql` before deploying V3.9.19. The release adds auditable relist-successor/detection fields, current-episode scoring, expiry-aware closure confirmation, multi-check relist watch, recent-ended Opportunity support, and production relist probe/reseed utilities.
+
+After deployment, run `worker/reseed_expired_due.py` in dry-run mode and then `--apply` after reviewing the affected rows. Use `worker/recheck_relist.py` to prove known relist fixtures against the live marketplace before treating relist discovery as production-validated.
 
 ## Documentation policy
 
-The docs describe the **current implementation**, not a diary of every patch. When a release changes an algorithm, schema, workflow, version string, or operational procedure, update the relevant maintained document in the same commit.
-
-Historical release notes are consolidated in [`RELEASE_HISTORY.md`](RELEASE_HISTORY.md). Do not add new root-level `Vx_y_RELEASE.md` files unless there is a strong reason to preserve a one-off migration note.
-
-Current application release: **V3.9.11 — Observation Decision Inbox + UI Layering**.
-
-### V3.9.12 additions
-
-Opportunity Signals are documented across `SYSTEM_OVERVIEW.md`, `ARCHITECTURE.md`, `ALGORITHMS_AND_FORMULAS.md`, and `OPERATIONS_AND_TROUBLESHOOTING.md`. Migration/setup requirements are in `SETUP.md`; release details are in `RELEASE_HISTORY.md`.
-
-
-Current documented release: **V3.9.15** — standalone opportunity signals alongside corroborated product-family opportunities, with marketplace behavioural intent, public Q&A intelligence and persistent Trade Me listing drafts.
-
-### V3.9.16 note
-Trade Me view extraction now fails closed: if COBALT cannot locate a trusted views-specific counter it records no view count rather than guessing from page text. Use `worker/recheck_listing.py` for a targeted repair of a suspicious listing. The header opportunity control is text-only (`OPPORTUNITIES [N]`) and visually separated from the NZST clock.
-
-
-### V3.9.17 deployment note
-
-Apply `supabase/migrations/016_interest_suppression.sql` before using **Not Interested in Tracking**. Deploy the web/worker changes after the migration. AWS EventBridge Scheduler is the production clock; do not re-add GitHub's native cron.
+The maintained docs describe the **current implementation**. When a release changes an algorithm, schema, workflow, version, UI contract or operational procedure, update the relevant document in the same commit. Historical details belong in `RELEASE_HISTORY.md`, not new root-level release files.

@@ -29,11 +29,11 @@ Core principles:
 - no CAPTCHA/access-verification bypass or anti-bot evasion.
 
 
-V3.9.11 decision flow:
+Current decision flow:
 
 ```text
 active observation candidate
-  ├─ create/auto-promote Product -> promoted (source link retained)
+  ├─ create Product explicitly -> promoted (source link retained)
   └─ dismiss                    -> dismissed
                                    └─ restore -> active
 ```
@@ -46,7 +46,7 @@ The opportunity layer sits between listing-level research and commercial Product
 
 `listings + observations -> listing signals -> product-family clustering -> opportunities -> supplier research -> My Products`
 
-The Observation Queue remains listing-level evidence. Opportunity status never overwrites a listing's deterministic signal label (`TOO EARLY`, `LOW SIGNAL`, `WATCHING`, `GOOD`, `MUST_HAVE`) or its observation schedule.
+The Observation Queue remains listing-level evidence. Opportunity status never overwrites a listing's deterministic signal label (`TOO EARLY`, `LOW SIGNAL`, `WATCHING`, `GOOD`, `MUST_HAVE`) or its observation schedule. In V3.9.18 the product workflow is explicitly operator-controlled: research signals do not auto-create commercial Products. The Observation Queue is the evidence ledger; Opportunities is the sourcing-decision inbox; My Products begins only when the operator chooses to move forward.
 
 ### Durable opportunity tables
 
@@ -99,3 +99,30 @@ The generic similarity layer does not contain vehicle makes/models or category-s
 ## Scheduler ownership
 
 V3.9.17 makes AWS EventBridge Scheduler the clock. The repository workflow is `workflow_dispatch` only. Because retryable external scheduling is at-least-once in practice, `worker/dispatch_guard.py` suppresses repeat dispatches within eight minutes before dependency installation. GitHub Actions remains the worker compute environment.
+
+
+### V3.9.18 final cadence / pricing clarification
+- Observation cadence now heats and cools on real view gains across independent (>=3h) checks: Hot 3h, Warm 6h, Normal 12h, Cold 24h.
+- Missing marketplace price does **not** invalidate demand evidence. A listing can be GOOD or support an Opportunity from view/bid/buyer-intent evidence even when no price is exposed.
+- Missing prices are never converted to zero and are excluded from opportunity price ranges and product suggested-price benchmarks. Opportunities disclose partial/no price coverage explicitly.
+- Opportunity scans return a compact audit of the strongest qualified families/standalone leads so production scans can be inspected instead of silently waiting.
+- Locked tables are covered by a single full-surface interaction gate; child hover/click behavior is disabled until activation, and row actions are anchored to the visible right edge during horizontal scrolling.
+
+
+## V3.9.19 ended-listing and relist architecture
+
+```text
+live listing episode
+  -> expiry confirmation (close + ~10m when known)
+  -> relist_watch
+       -> same ID live again ............ new episode on same row
+       -> old URL resolves to new ID .... deterministic successor edge
+       -> explicit marketplace link ..... deterministic successor edge
+       -> ended-page candidate .......... collect + conservative semantic match
+       -> no successor yet .............. sparse 1h/6h/18h/48h/96h checks
+       -> watch exhausted ............... terminal_closed
+```
+
+A new marketplace ID is never merged destructively into the old canonical listing. The rows share `listing_family_id`; the child points to `relisted_from`, the parent points to `relist_successor_uuid`, and the child receives the next `lifecycle_episode`. Same-ID reopening increments the episode on the existing row. Current-listing scoring reads only observations from the current episode.
+
+Opportunity evidence is intentionally asymmetric: at least one current **live** positive listing is required to create/strengthen an active family Opportunity. Recently ended episodes can corroborate the family (full historical support through 7 days; reduced support through 30 days) but cannot create an Opportunity by themselves. This preserves useful market history without allowing stale listings to masquerade as current demand.

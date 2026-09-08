@@ -1,6 +1,6 @@
 {
   "name": "cobalt-web",
-  "version": "3.9.17",
+  "version": "3.9.19",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,8 +8,10 @@
     "start": "next start",
     "test:intelligence": "node scripts/test-intelligence.cjs",
     "test:opportunities": "node scripts/test-opportunities.cjs",
-    "test:all": "npm run test:intelligence && npm run test:opportunities && npm run test:similarity",
-    "test:similarity": "node scripts/test-generic-similarity.cjs"
+    "test:all": "npm run test:intelligence && npm run test:opportunities && npm run test:similarity && npm run test:cadence && npm run test:relist",
+    "test:similarity": "node scripts/test-generic-similarity.cjs",
+    "test:cadence": "python3 ../worker/test_adaptive_cadence.py",
+    "test:relist": "python3 ../worker/test_explicit_relist.py && python3 ../worker/test_relist_matcher.py"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

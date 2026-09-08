@@ -7,3 +7,8 @@
 **/.next/
 __pycache__/
 *.pyc
+
+# COBALT local worker diagnostics / exports
+worker/relist_debug/
+worker/scheduler_debug.jsonl
+worker/export_database_csvs.py

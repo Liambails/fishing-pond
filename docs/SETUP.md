@@ -1,6 +1,6 @@
 # COBALT — setup and deployment
 
-Current release: **V3.9.11**. This guide assumes the active local repository is `~/cobalt`.
+Current release: **V3.9.19**. This guide assumes the active local repository is `~/cobalt`.
 
 ## Prerequisites
 
@@ -18,7 +18,7 @@ git --version
 Create/configure the project, then apply `supabase/migrations/*.sql` in numeric order through:
 
 ```text
-012_structured_comparable_identity.sql
+017_relist_lineage_hardening.sql
 ```
 
 Keep `SUPABASE_SERVICE_ROLE_KEY` private. It belongs only in trusted server/worker environments.
@@ -60,7 +60,7 @@ COBALT_INGEST_TOKEN
 
 The workflow lives at `.github/workflows/observe.yml`. It records scheduler telemetry, checks due work, conditionally installs Chromium, runs the worker, and uploads diagnostics.
 
-Use `workflow_dispatch` for a remote-environment test. Then separately validate a real scheduled wake; manual dispatch does not prove cron behavior.
+Use `workflow_dispatch` for a remote-environment test. Production scheduling is owned by AWS EventBridge Scheduler -> Lambda -> GitHub `workflow_dispatch`; GitHub native cron is intentionally not used.
 
 ## Vercel web application
 
@@ -155,3 +155,8 @@ After V3.9.12, run `supabase/migrations/014_marketplace_signal_intelligence.sql`
 ## V3.9.15 schema update
 
 After V3.9.14, run `supabase/migrations/015_standalone_opportunity_signals.sql` before deploying V3.9.15. The migration is additive: it adds `opportunity_type` to the existing opportunity table and classifies existing rows as `corroborated` by default. No listing, observation, product or notification history is deleted.
+
+
+## V3.9.19 schema + relist acceptance step
+
+Apply `supabase/migrations/017_relist_lineage_hardening.sql` before V3.9.19 web/worker deployment. Then run the full regression suite/build. After deploy, run `worker/reseed_expired_due.py` in dry-run mode and review before `--apply`. For the current known Trade Me regression fixture, run `worker/recheck_relist.py 6110749863` (or pass successor `6121769780`) and confirm the reset begins a new lifecycle episode rather than producing a negative counter delta.

@@ -91,3 +91,30 @@ console.log('marketplace-intent regression tests passed');
 // even when attention/buyer intent or peer context is strong.
 assert.notEqual(intentRich.label, 'GOOD', 'three independent observations must never unlock GOOD');
 console.log('four-window GOOD gate regression test passed');
+
+// V3.9.18: a transient missing price must not erase previously captured price evidence.
+const priceCarryForward = computeListingSignal(listing([
+  { captured_at: at(12), views: 10, buy_now_nzd: 55.20 },
+  { captured_at: at(6), views: 13, buy_now_nzd: 55.20 },
+  { captured_at: at(0), views: 16, buy_now_nzd: null, asking_price_nzd: null, current_bid_nzd: null },
+]));
+assert.equal(priceCarryForward.price, 55.20);
+assert.equal(priceCarryForward.priceIsLatest, false);
+console.log('last-known price carry-forward regression test passed');
+
+// V3.9.19: relisted counters reset into a new lifecycle episode. Old 27 views -> new 2 views
+// must never be interpreted as a negative current-period change or inflate current evidence.
+const relisted = computeListingSignal({
+  id: 'relist-regression', listing_id: 'relist-regression', title: 'Toyota Aqua master window switch', url: 'https://example.test/listing/relist', active: true, metadata: {}, lifecycle_episode: 2,
+  observations: [
+    { captured_at: at(30), lifecycle_episode: 1, views: 22 },
+    { captured_at: at(18), lifecycle_episode: 1, views: 27 },
+    { captured_at: at(6), lifecycle_episode: 2, views: 2 },
+    { captured_at: at(0), lifecycle_episode: 2, views: 5 },
+  ],
+  last_observed_at: at(0),
+});
+assert.equal(relisted.observationCount, 2, 'current signal must use only the active lifecycle episode');
+assert.equal(relisted.independentObservationCount, 2);
+assert.ok(relisted.lastViewChange === 3 || relisted.lastViewChange === null, `new episode should measure 2 -> 5, got ${relisted.lastViewChange}`);
+console.log('relist episode reset regression test passed');
