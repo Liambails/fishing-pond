@@ -22,6 +22,7 @@ function tokens(s:any){return [...new Set(norm(s).split(/\s+/).filter(x=>x.lengt
 function median(a:number[]){if(!a.length)return null;const x=[...a].sort((m,n)=>m-n);const i=Math.floor(x.length/2);return x.length%2?x[i]:(x[i-1]+x[i])/2}
 function latestObs(l:any){return [...(l.observations||[])].sort((a:any,b:any)=>Date.parse(b.captured_at)-Date.parse(a.captured_at))[0]||null}
 function latestPrice(l:any){for(const o of [...(l.observations||[])].sort((a:any,b:any)=>Date.parse(b.captured_at)-Date.parse(a.captured_at))){const p=o?.buy_now_nzd??o?.asking_price_nzd??o?.starting_price_nzd??o?.current_bid_nzd??null;if(p!=null&&Number.isFinite(Number(p)))return Number(p)}return null}
+function observedAgeHours(l:any){const latest=latestObs(l);const end=Date.parse(latest?.captured_at||l.last_observed_at||l.last_seen||'');const start=Date.parse(l.first_seen||l.created_at||'');if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start)return 0;return Math.max(0,(end-start)/3600000)}
 function categoryOf(l:any){const p=l?.metadata?.category_path;return Array.isArray(p)?p.join(' > '):String(p||'Marketplace')}
 function modelOf(title:string){const n=norm(title);return MODELS.find(m=>n.includes(m.replace(' ',' ')))||null}
 function makeOf(title:string){const n=norm(title);return MAKES.find(m=>n.includes(m))||null}
@@ -82,22 +83,44 @@ function standaloneTitle(l:any){
  const composed=[i.make,i.model,i.product_type].filter(Boolean).join(' ').replace(/\b\w/g,c=>c.toUpperCase());
  return composed||String(l.title||'Standalone marketplace product');
 }
-function standaloneQualification(l:any){
- const s=l.signal||{}; const independent=Number(s.independentObservationCount||0); const span=Number(s.evidenceDetails?.spanHours||0);
+export function classifyStandaloneOpportunity(s:any){
+ const independent=Number(s.independentObservationCount||0); const span=Number(s.evidenceDetails?.spanHours||s.spanHours||0);
  const velocity=Number(s.velocity||0); const interval=Number(s.velocityIntervalHours||0); const confidence=Number(s.confidence||0); const intent=Number(s.engagementScore||0);
  const watchers=Number(s.watchers||0); const bids=Number(s.bids||0); const purchaseQs=Number(s.purchaseIntentQuestions||0); const sold=Boolean(s.soldDetected);
  const views24=Number(s.views24h||0); const lastDelta=Number(s.lastViewChange||0);
- // Opportunities are research leads, not purchase orders. A useful lead may surface before
- // an individual listing earns GOOD, provided the movement is sustained rather than a short burst.
- const enoughHistory=independent>=3&&span>=12&&interval>=6&&confidence>=48;
- const meaningfulMovement=views24>=4||velocity>=5||lastDelta>=3;
  const buyerIntent=sold||bids>=1||watchers>=2||purchaseQs>=1||intent>=50;
- const qualifies=enoughHistory&&meaningfulMovement&&(buyerIntent||velocity>=7||views24>=6);
+ // V3.9.22: a sparse-but-well-spaced pair of checks can create an EARLY lead when the
+ // movement is unmistakable. This is intentionally not enough for STRONG/SOURCE_NOW.
+ const sparseEarly=independent>=2&&span>=8&&interval>=8&&confidence>=34&&lastDelta>=5&&velocity>=9;
+ const normalEarly=independent>=3&&span>=10&&interval>=6&&confidence>=44&&(views24>=4||velocity>=5||lastDelta>=3)&&(buyerIntent||velocity>=7||views24>=6);
+ const qualifies=sparseEarly||normalEarly;
  if(!qualifies)return {qualifies:false};
- const demandScore=Math.min(100,Math.round(Math.min(38,Math.max(0,views24)*3.5)+Math.min(24,Math.max(0,velocity)*2)+Math.min(18,intent*.28)+Math.min(10,watchers*2)+Math.min(10,bids*5)+Math.min(8,purchaseQs*3)+(sold?12:0)));
- const sourcingStage=independent>=4&&span>=24&&interval>=12&&demandScore>=72&&(views24>=8||velocity>=9)&&(buyerIntent||views24>=12)?'STRONG_LEAD':'EARLY_LEAD';
- const sourceNow=independent>=4&&span>=30&&interval>=12&&demandScore>=84&&(sold||bids>=2||purchaseQs>=2||views24>=15||velocity>=14);
- return {qualifies:true,strength:sourceNow||sourcingStage==='STRONG_LEAD'?'STRONG':'EMERGING',sourcingStage:sourceNow?'SOURCE_NOW':sourcingStage,demandScore,independent,span,velocity,interval,confidence,intent,watchers,bids,purchaseQs,sold,views24,lastDelta};
+ const demandScore=Math.min(100,Math.round(Math.min(38,Math.max(0,views24)*3.5)+Math.min(26,Math.max(0,velocity)*2.1)+Math.min(18,intent*.28)+Math.min(10,watchers*2)+Math.min(10,bids*5)+Math.min(8,purchaseQs*3)+(sold?12:0)));
+ const strong=independent>=3&&span>=16&&interval>=8&&demandScore>=52&&(views24>=8||velocity>=8||lastDelta>=5)&&(buyerIntent||independent>=4||velocity>=10);
+ const sourceNow=independent>=4&&span>=24&&interval>=10&&demandScore>=62&&(views24>=14||velocity>=12)&&(sold||bids>=2||purchaseQs>=2||views24>=18||velocity>=15);
+ const sourcingStage=sourceNow?'SOURCE_NOW':strong?'STRONG_LEAD':'EARLY_LEAD';
+ return {qualifies:true,strength:sourcingStage==='EARLY_LEAD'?'EMERGING':'STRONG',sourcingStage,demandScore,independent,span,velocity,interval,confidence,intent,watchers,bids,purchaseQs,sold,views24,lastDelta,sparseEarly};
+}
+function standaloneQualification(l:any){return classifyStandaloneOpportunity(l.signal||{})}
+
+export function classifyFamilyOpportunity(x:any){
+ const positive=Number(x.positive||0),mature=Number(x.mature||0),span=Number(x.span||0),medianPace=Number(x.medianPace||0),total24=Number(x.total24||0),max24=Number(x.max24||0),demand=Number(x.demand||0);
+ const bids=Number(x.bids||0),purchaseQs=Number(x.purchaseQs||0),sold=Number(x.sold||0),medianAge=Number(x.medianAge||span),medianIndependent=Number(x.medianIndependent||0);
+ if(positive<2||span<6||medianAge<6||(medianPace<1.25&&total24<4))return null;
+ let stage:'EARLY_LEAD'|'STRONG_LEAD'|'SOURCE_NOW'='EARLY_LEAD';
+ const buyerSignals=bids+purchaseQs+sold;
+ // Two corroborating listings can become STRONG with only two independent captures each
+ // when those captures are well spaced and the family is moving quickly. Otherwise we wait
+ // for three independent windows on both listings. This trades raw count for time + corroboration.
+ const matureTwo=positive>=2&&mature>=2&&span>=12&&medianAge>=10&&demand>=45&&(medianPace>=2.25||total24>=8);
+ const sparseButStrong=positive>=2&&medianIndependent>=2&&span>=14&&medianAge>=12&&demand>=50&&(medianPace>=4||total24>=12);
+ const broadFamily=positive>=3&&mature>=2&&span>=10&&medianAge>=8&&demand>=43&&(medianPace>=2||total24>=9);
+ const buyerBacked=positive>=2&&span>=8&&medianAge>=8&&demand>=50&&buyerSignals>0&&(medianPace>=1.5||total24>=6);
+ if(matureTwo||sparseButStrong||broadFamily||buyerBacked)stage='STRONG_LEAD';
+ const deepFamily=positive>=3&&mature>=3&&span>=20&&medianAge>=16&&demand>=68&&(medianPace>=4||total24>=18)&&(buyerSignals>0||max24>=8);
+ const exceptionalPair=positive>=2&&mature>=2&&span>=24&&medianAge>=20&&demand>=76&&total24>=22&&max24>=10;
+ if(deepFamily||exceptionalPair)stage='SOURCE_NOW';
+ return stage;
 }
 
 
@@ -125,21 +148,21 @@ export async function scanOpportunities(db:any){
   const velocities=livePositive.map(l=>Number(l.signal.velocity||0)).filter(Number.isFinite); const med=median(velocities)||0;
   const views24Values=livePositive.map(l=>Math.max(0,Number(l.signal?.views24h||0))); const totalViews24=views24Values.reduce((a,b)=>a+b,0); const maxViews24=Math.max(0,...views24Values);
   const maturePositive=livePositive.filter(l=>Number(l.signal?.independentObservationCount||0)>=3).length;
-  if(med<1.5&&totalViews24<4)continue;
+  const independentCounts=livePositive.map(l=>Number(l.signal?.independentObservationCount||0)); const medianIndependent=median(independentCounts)||0;
+  const liveAges=livePositive.map(observedAgeHours); const medianAge=median(liveAges)||0;
+  if(med<1.25&&totalViews24<4)continue;
   group.forEach((l:any)=>corroboratedListingIds.add(String(l.id)));
   const rawPrices=group.filter((l:any)=>l.active).map(latestPrice); const prices=rawPrices.filter((x:any)=>x!=null&&Number.isFinite(Number(x))).map(Number); const pricedListings=prices.length; const missingPriceListings=Math.max(0,group.filter((l:any)=>l.active).length-pricedListings); const conf=median(livePositive.map(l=>Number(l.signal?.confidence||0)))||0;
   const intentScores=group.filter((l:any)=>l.active).map(l=>Number(l.signal?.engagementScore)).filter(Number.isFinite); const medIntent=median(intentScores)||0;
   const purchaseQs=group.filter((l:any)=>l.active).reduce((n,l)=>n+Number(l.signal?.purchaseIntentQuestions||0),0); const questionCount=group.filter((l:any)=>l.active).reduce((n,l)=>n+Number(l.signal?.questionCount||0),0);
   const watcherCount=group.filter((l:any)=>l.active).reduce((n,l)=>n+Number(l.signal?.watchers||0),0); const bidCount=group.filter((l:any)=>l.active).reduce((n,l)=>n+Number(l.signal?.bids||0),0); const soldCount=group.filter((l:any)=>l.active&&l.signal?.soldDetected).length;
   const times=group.flatMap(l=>(l.observations||[]).map((o:any)=>Date.parse(o.captured_at)).filter(Number.isFinite)); const span=times.length?(Math.max(...times)-Math.min(...times))/3600000:0;
-  if(span<8)continue;
+  if(span<6||medianAge<6)continue;
   const family=familyIdentity(group);
   const demandScore=Math.min(100,Math.round(Math.min(30,totalViews24*2.2)+Math.min(18,med*2.2)+Math.min(18,livePositive.length*4)+Math.min(12,supportWeight*4)+Math.min(14,medIntent*.25)+Math.min(10,purchaseQs*3)+Math.min(8,bidCount*4)+Math.min(8,soldCount*8)));
-  let sourcingStage:'EARLY_LEAD'|'STRONG_LEAD'|'SOURCE_NOW'='EARLY_LEAD';
-  if((livePositive.length>=3&&maturePositive>=2&&span>=18&&demandScore>=55&&(med>=3||totalViews24>=12))||(livePositive.length>=2&&demandScore>=65&&(bidCount>0||purchaseQs>0||soldCount>0)))sourcingStage='STRONG_LEAD';
-  if(livePositive.length>=4&&maturePositive>=3&&span>=24&&demandScore>=78&&(med>=5||totalViews24>=22)&&(soldCount>0||bidCount>=2||purchaseQs>=2||maxViews24>=10))sourcingStage='SOURCE_NOW';
+  const sourcingStage=classifyFamilyOpportunity({positive:livePositive.length,mature:maturePositive,span,medianPace:med,total24:totalViews24,max24:maxViews24,demand:demandScore,bids:bidCount,purchaseQs,sold:soldCount,medianAge,medianIndependent})||'EARLY_LEAD';
   const strength=sourcingStage==='EARLY_LEAD'?'EMERGING':'STRONG'; const key=familyKey(group);
-  const metrics={opportunity_type:'corroborated',sourcing_stage:sourcingStage,comparable_listings:group.length,positive_listings:livePositive.length,independent_listings:maturePositive,recent_ended_support:historicalSupport.length,historical_support_weight:Number(supportWeight.toFixed(2)),median_velocity:Number(med.toFixed(2)),total_views_24h:totalViews24,max_views_24h:maxViews24,price_min:prices.length?Math.min(...prices):null,price_max:prices.length?Math.max(...prices):null,evidence_window_hours:Number(span.toFixed(1)),median_confidence:Number(conf.toFixed(1)),marketplace_demand_score:demandScore,median_buyer_intent_score:Number(medIntent.toFixed(1)),question_count:questionCount,purchase_intent_questions:purchaseQs,watchers:watcherCount,bids:bidCount,sold_confirmations:soldCount,priced_listings:pricedListings,missing_price_listings:missingPriceListings,pricing_status:pricedListings===0?'NO_PRICE_EVIDENCE':pricedListings<group.filter((l:any)=>l.active).length?'PARTIAL_PRICE_EVIDENCE':'COMPLETE_PRICE_EVIDENCE'};
+  const metrics={opportunity_type:'corroborated',sourcing_stage:sourcingStage,comparable_listings:group.length,positive_listings:livePositive.length,independent_listings:maturePositive,recent_ended_support:historicalSupport.length,historical_support_weight:Number(supportWeight.toFixed(2)),median_velocity:Number(med.toFixed(2)),total_views_24h:totalViews24,max_views_24h:maxViews24,price_min:prices.length?Math.min(...prices):null,price_max:prices.length?Math.max(...prices):null,evidence_window_hours:Number(span.toFixed(1)),median_listing_age_hours:Number(medianAge.toFixed(1)),median_independent_observations:Number(medianIndependent.toFixed(1)),median_confidence:Number(conf.toFixed(1)),marketplace_demand_score:demandScore,median_buyer_intent_score:Number(medIntent.toFixed(1)),question_count:questionCount,purchase_intent_questions:purchaseQs,watchers:watcherCount,bids:bidCount,sold_confirmations:soldCount,priced_listings:pricedListings,missing_price_listings:missingPriceListings,pricing_status:pricedListings===0?'NO_PRICE_EVIDENCE':pricedListings<group.filter((l:any)=>l.active).length?'PARTIAL_PRICE_EVIDENCE':'COMPLETE_PRICE_EVIDENCE'};
   const historicalNote=historicalSupport.length?` ${historicalSupport.length} recently ended related listing${historicalSupport.length===1?' also supports':'s also support'} this pattern.`:'';
   const reason=`We found ${livePositive.length} live similar listing${livePositive.length===1?'':'s'} attracting attention. Together they gained ${totalViews24} view${totalViews24===1?'':'s'} in the last 24 hours, and the strongest gained ${maxViews24}. That makes this less likely to be a one-off listing${purchaseQs||bidCount||soldCount?`. We also saw stronger buyer signals: ${bidCount} bid${bidCount===1?'':'s'}, ${purchaseQs} purchase-intent question${purchaseQs===1?'':'s'}${soldCount?`, and ${soldCount} sold confirmation${soldCount===1?'':'s'}`:''}`:''}.${historicalNote}`;
   const pricingNote=pricedListings===0?' No usable marketplace price has been captured yet; this does not weaken the demand signal, but COBALT will not infer a recommended price from this family.':missingPriceListings>0?` ${missingPriceListings} related listing${missingPriceListings===1?' has':'s have'} no usable price and ${missingPriceListings===1?'is':'are'} excluded from the price range.`:''; const recommendation=(sourcingStage==='SOURCE_NOW'?'Make supplier research a priority. This is still a marketplace-attention signal, so confirm cost, margin and exact product fit before buying stock.':sourcingStage==='STRONG_LEAD'?'Investigate Chinese supplier pricing now while COBALT keeps observing the market.':'This is worth a quick supplier search. Treat it as an early research lead while COBALT gathers more evidence.')+pricingNote;

@@ -12,4 +12,11 @@ assert.ok(sameVehicle.score>wrongVehicle.score,`Colorado family should outrank u
 assert.ok(isStrongGenericMatch(sameVehicle),'near-duplicate Colorado listing should qualify for strong generic match');
 assert.ok(!isStrongGenericMatch(wrongVehicle),'different vehicle family must not be suppressed just because both are window switches');
 assert.ok(isStrongGenericMatch(kitchen),'generic matcher should also work outside vehicle parts');
+
+const vitzLeft={title:'Toyota Vitz (SCP90) Left / Passenger Tail Light (KOITO 52-185)',metadata:{category_path:['motors','car-parts-accessories','toyota','exterior']}};
+const vitzRight={title:'Toyota Vitz (SCP90) Right / Driver Tail Light (KOITO 52-143)',metadata:{category_path:['motors','car-parts-accessories','toyota','exterior']}};
+const vitzIdf=buildIdf([listingDocument(vitzLeft),listingDocument(vitzRight),listingDocument(toyota),listingDocument(pan)]);
+const vitzPair=genericListingSimilarity(vitzLeft,vitzRight,vitzIdf);
+assert.ok(vitzPair.score>=.56&&vitzPair.cosine>=.48&&(vitzPair.category>=.20||vitzPair.identifierOverlap),`Vitz left/right tail lights should enter the same opportunity family (${JSON.stringify(vitzPair)})`);
+
 console.log('category-agnostic similarity regression tests passed');

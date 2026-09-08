@@ -21,7 +21,7 @@ export default async function Page(){
   db.from('system_events').select('*').order('occurred_at',{ascending:false}).limit(150),
   fetchPaged(()=>db.from('product_listings').select('*').order('product_id',{ascending:true}),1000,50000),
   fetchPaged(()=>db.from('own_listings').select('*').eq('active',true).order('id',{ascending:true}),1000,10000),
-  fetchPaged(()=>db.from('product_match_candidates').select('*').in('status',['review','accepted','auto_linked']).order('id',{ascending:true}),1000,50000),
+  fetchPaged(()=>db.from('product_match_candidates').select('*').in('status',['review','accepted','auto_linked']).order('created_at',{ascending:true}),1000,50000),
   db.from('opportunities').select('*').order('last_detected_at',{ascending:false}).limit(500),
   db.from('opportunity_notifications').select('*').order('created_at',{ascending:false}).limit(500),
   fetchPaged(()=>db.from('opportunity_listings').select('*').order('opportunity_id',{ascending:true}),1000,50000),
