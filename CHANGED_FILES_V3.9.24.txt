@@ -1,0 +1,6 @@
+COBALT V3.9.24
+.github/workflows/observe.yml
+web/package.json
+web/package-lock.json
+extension-v2/manifest.json
+docs/RELEASE_HISTORY.md

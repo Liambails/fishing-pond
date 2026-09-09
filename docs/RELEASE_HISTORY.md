@@ -275,3 +275,9 @@ V3.9.12 adds a durable cross-listing opportunity layer above the Observation Que
 - Returning to the tab/window triggers an immediate refresh.
 - Opportunity refresh responses are explicitly non-cacheable.
 - No scoring or V3.9.22 calibration thresholds changed.
+## V3.9.24 — Opportunity scheduler auth/path hotfix
+
+- Keeps the opportunity scan step in the workflow's `worker` working directory so scheduler telemetry and diagnostics resolve correctly.
+- Adds an explicit preflight failure when `COBALT_INGEST_TOKEN` is missing from GitHub Actions.
+- A HTTP 401 from `/api/opportunities/scan` still requires the GitHub Actions and Vercel production `COBALT_INGEST_TOKEN` values to match; secrets are intentionally not embedded in source.
+
