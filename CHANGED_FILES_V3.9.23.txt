@@ -1,0 +1,9 @@
+COBALT V3.9.23 — Live Opportunity notifications
+
+web/app/api/opportunities/route.ts
+web/components/Dashboard.tsx
+web/package.json
+web/package-lock.json
+extension-v2/manifest.json
+docs/RELEASE_HISTORY.md
+CHANGED_FILES_V3.9.23.txt

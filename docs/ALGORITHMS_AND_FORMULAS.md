@@ -1,6 +1,6 @@
 # COBALT — algorithms and formulas
 
-This document describes the deterministic calculations in the current V3.9.19 codebase. When thresholds/formulas change, update this file in the same commit.
+This document describes the deterministic calculations in the current V3.9.20 codebase. When thresholds/formulas change, update this file in the same commit.
 
 ## 0. Capture episodes
 
@@ -521,3 +521,10 @@ ended > 30 days ago    -> not used for current Opportunity qualification
 ```
 
 Live listings remain the source for current 24-hour movement and live observed price ranges.
+
+
+## V3.9.20 same-ID relist evidence
+
+A counter drop alone never opens a new lifecycle episode. For a same marketplace ID, COBALT compares the latest observation in the current episode with the new capture. A new episode is accepted when the previous advertised close has elapsed and the new capture is live with a substantially later future close, or when an ended/relist-watch row returns with a future close. A substantial view reset can corroborate the transition. The old episode remains finalized; the reset counter becomes the baseline of the new episode, so e.g. `44 -> 3` across a relist is never treated as `-41` demand.
+
+Generic marketplace attributes are captured as label/value facts and are not coerced into automotive identity. Known labels such as Views, Condition, Location, Watchers, Bids and Closes may backfill their normalized fields only when the primary extractor left that field missing.

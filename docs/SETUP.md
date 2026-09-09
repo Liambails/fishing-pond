@@ -1,6 +1,6 @@
 # COBALT — setup and deployment
 
-Current release: **V3.9.19**. This guide assumes the active local repository is `~/cobalt`.
+Current release: **V3.9.21**. This guide assumes the active local repository is `~/cobalt`.
 
 ## Prerequisites
 
@@ -160,3 +160,8 @@ After V3.9.14, run `supabase/migrations/015_standalone_opportunity_signals.sql` 
 ## V3.9.19 schema + relist acceptance step
 
 Apply `supabase/migrations/017_relist_lineage_hardening.sql` before V3.9.19 web/worker deployment. Then run the full regression suite/build. After deploy, run `worker/reseed_expired_due.py` in dry-run mode and review before `--apply`. For the current known Trade Me regression fixture, run `worker/recheck_relist.py 6110749863` (or pass successor `6121769780`) and confirm the reset begins a new lifecycle episode rather than producing a negative counter delta.
+
+
+## V3.9.20 schema + acceptance step
+
+Apply `supabase/migrations/018_generic_marketplace_lifecycle.sql` after migration 017. Reload the PostgREST schema if required, then run `npm run test:all` and `npm run build` from `web/`. Acceptance includes creating a My Product from a non-automotive listing with `part_type = null`, hovering the Observation Queue title to inspect captured marketplace facts, and verifying a recently ended listing shows `Relist watch` with a scheduled next probe rather than `Stopped`.

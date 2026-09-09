@@ -1,0 +1,15 @@
+COBALT V3.9.18 source update
+
+web/components/Dashboard.tsx
+web/app/globals.css
+web/lib/opportunities.ts
+web/app/api/ingest/route.ts
+worker/db.py
+worker/test_adaptive_cadence.py
+web/package.json
+docs/RELEASE_HISTORY.md
+docs/ALGORITHMS_AND_FORMULAS.md
+docs/ARCHITECTURE.md
+worker/cadence.py
+web/lib/intelligence.ts
+web/scripts/test-intelligence.cjs

@@ -126,3 +126,10 @@ live listing episode
 A new marketplace ID is never merged destructively into the old canonical listing. The rows share `listing_family_id`; the child points to `relisted_from`, the parent points to `relist_successor_uuid`, and the child receives the next `lifecycle_episode`. Same-ID reopening increments the episode on the existing row. Current-listing scoring reads only observations from the current episode.
 
 Opportunity evidence is intentionally asymmetric: at least one current **live** positive listing is required to create/strengthen an active family Opportunity. Recently ended episodes can corroborate the family (full historical support through 7 days; reduced support through 30 days) but cannot create an Opportunity by themselves. This preserves useful market history without allowing stale listings to masquerade as current demand.
+
+
+## V3.9.20 generic listing evidence architecture
+
+The collector emits both normalized cross-category fields and a generic `marketplace_attributes` label/value list. The worker/manual ingest persist those attributes plus description/category/image on each observation while retaining the entire raw snapshot. The dashboard reads the latest observation and renders a scrollable listing inspector from first-class fields, raw evidence, seller facts, shipping, Q&A and marketplace attributes. Product creation no longer requires an automotive `part_type`.
+
+Relist detection is layered: (1) continue scheduled probes of the original URL after expiry; (2) detect same-ID lifecycle reset using elapsed-close/new-future-close and corroborating counters; (3) accept marketplace redirects or explicit relist links to a new `/listing/<id>` as authoritative new-ID lineage; (4) keep semantic replacement matching as lower-confidence fallback rather than conflating it with explicit marketplace relisting.

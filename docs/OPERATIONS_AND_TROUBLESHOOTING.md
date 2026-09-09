@@ -151,7 +151,7 @@ When an API error says a column is missing from the PostgREST schema cache:
 NOTIFY pgrst, 'reload schema';
 ```
 
-V3.9.19 requires migrations through `017_relist_lineage_hardening.sql`. Apply migration 017 before deploying code that reads/writes relist successor or detection fields.
+V3.9.20 requires migrations through `018_generic_marketplace_lifecycle.sql`. Apply migrations 017 and 018 before deploying code that reads/writes relist lineage and generic observation fields.
 
 ## Local build/deployment checks
 
@@ -325,3 +325,10 @@ from public.listing_lifecycle_events
 where marketplace_listing_id in ('6110749863','6121769780')
 order by occurred_at;
 ```
+
+
+## V3.9.20 relist watch and generic capture checks
+
+A recently ended listing should normally have `lifecycle_state = relist_watch`, `active = false`, and a non-null `next_observation_at` until the bounded 1/6/18/48/96-hour watch sequence or ten-day window is exhausted. The dashboard intentionally shows this as `Relist watch`, not `Stopped`. Same-ID relists may be detected even if COBALT missed the transient closed page: the strongest signal is an elapsed previous close followed by a new future close on the same marketplace ID; a large view reset is supporting evidence and never a sole trigger. For new-ID relists, the worker first trusts an explicit Trade Me relist link/redirect whose destination resolves to `/listing/<id>`, then verifies the successor.
+
+Generic marketplace captures persist `description`, `category_path`, `primary_image_url`, and `marketplace_attributes` on observations, with the complete collector envelope retained in `raw_snapshot`. Missing fields must remain missing rather than being fabricated; marketplace label/value attributes are used to backfill generic fields only when the primary extractor did not find them.

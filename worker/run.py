@@ -52,10 +52,10 @@ def detect_relist_from_capture(listing,raw,db,headless,run_id=None):
    save_success(child,child_raw); run_matcher_for_listing(child['id'])
    return {'listing_id':observed_id,'created':created,'source':'marketplace_redirect','confidence':1.0,'capture':'success','views':child_raw.get('views')}
   return {'listing_id':observed_id,'created':False,'source':'marketplace_redirect','capture':'rejected'}
- if not effective_ended(raw):
+ explicit=raw.get('explicit_relist')
+ if not effective_ended(raw) and not explicit:
   return None
  candidates=list(raw.get('relist_candidates') or [])
- explicit=raw.get('explicit_relist')
  if explicit and not any(str(x.get('url'))==str(explicit.get('url')) for x in candidates): candidates.insert(0,explicit)
  if not candidates: return None
  parent_obs=_latest_parent_observation(db,listing); scored=[]; diagnostics=[]

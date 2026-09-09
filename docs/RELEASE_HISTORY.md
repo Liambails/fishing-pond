@@ -1,3 +1,22 @@
+# V3.9.21 — Opportunity Scanner Reliability Hotfix
+
+- Grants `service_role` CRUD access to `opportunities`, `opportunity_listings`, and `opportunity_notifications`; migration 013 created these tables without explicit grants, which can make the API scan fail through PostgREST.
+- Runs the opportunity scan on every non-duplicate scheduler wake-up, not only when Playwright has due listings.
+- Removes silent `continue-on-error` behavior from the opportunity step and records/logs the API response so a failed scan is visible immediately.
+- Keeps existing sourcing thresholds unchanged until the scanner is confirmed to materialise leads from the evidence already present.
+
+# V3.9.20 — Generic Marketplace Lifecycle + Listing Evidence Inspector
+
+- Recently ended listings stay on bounded relist watch (1h, 6h, 18h, 48h, 96h within a ten-day window) and the queue now displays the scheduled relist-watch probe instead of misleading `Stopped` text.
+- Same-ID relists can be detected even when COBALT misses the transient closed page: an elapsed previous close followed by a new future close is strong lifecycle evidence; view/bid/watcher resets are corroborating signals and never sole triggers.
+- Explicit marketplace relist links are scanned on every capture and new-ID redirects/`/listing/<id>` successor links remain authoritative lineage evidence.
+- Added migration 018: `products.part_type` is nullable; observations gain `description`, `category_path`, `primary_image_url`, and generic `marketplace_attributes`. This removes the non-automotive Create Product failure.
+- Trade Me collectors now preserve generic label/value attributes and use recognized labels to backfill missing Views, Watchers, Bids, Condition, Location and Close fields without category-specific assumptions. Collector version 1.5.6.
+- Observation Queue titles are clean external hyperlinks with a hover/focus evidence inspector containing listing facts, arbitrary marketplace details, description, shipping, Q&A/comments, seller facts and capture diagnostics in a scrollable panel.
+- Browser document title is now stable (`COBALT · Motera Research Lab`); only the visible header carries the release version.
+- Fixed the `product_match_candidates` dashboard query to order by the real `created_at` column rather than nonexistent `id`.
+- Added same-ID relist regression coverage.
+
 # V3.9.19 — Relist Lineage + Historical Evidence
 
 - Ended/expired listings are historical evidence, not active research work. The default Observation Queue excludes `relist_watch`, `terminal_closed` and `relisted` rows; an **Ended / expired** filter keeps them available without allowing them to dominate active sorting.
@@ -237,3 +256,22 @@ V3.9.12 adds a durable cross-listing opportunity layer above the Observation Que
 - Opportunity scans return a compact audit of the strongest qualified families/standalone leads so production scans can be inspected instead of silently waiting.
 - Locked tables are covered by a single full-surface interaction gate; child hover/click behavior is disabled until activation, and row actions are anchored to the visible right edge during horizontal scrolling.
 - A transient missing price no longer erases previously captured price evidence: the queue and opportunity pricing use the most recent known non-null marketplace price and mark it as carried forward when the newest capture omits price.
+
+### V3.9.20 performance follow-up
+- Observation Queue uses viewport windowing with ten-row overscan instead of mounting every matching listing row at once. Filtering/sorting still operates across the complete loaded research set; only DOM rendering is windowed.
+
+## V3.9.22 — Opportunity calibration
+- Recalibrated Opportunities for the actual sourcing workflow: EARLY_LEAD = quick supplier search, STRONG_LEAD = contact suppliers, SOURCE_NOW = prioritise supplier research.
+- Corroborated families can now become useful with fewer observations when evidence is temporally spaced and multiple related listings move together.
+- Two related listings can reach STRONG_LEAD without a third comparable when both have mature evidence, or when two sparse histories span enough time and show unusually strong movement.
+- Standalone listings can create an EARLY_LEAD from two independent, well-spaced checks only when movement is unmistakable; STRONG_LEAD and SOURCE_NOW retain materially stronger time/evidence requirements.
+- Added listing observed-age and median independent-observation metrics so stage decisions account for how long evidence has been accumulating, not only raw point count.
+- Trade Me buyer-intent fields remain useful bonuses but are no longer mandatory for very strong view-based SOURCE_NOW evidence.
+- Added broad calibration tests covering one/two/three/four/five+ observation cases, short bursts, weak long-running listings, buyer-backed listings, large mature datasets, and the real Toyota Vitz left/right tail-light regression pattern.
+
+
+## V3.9.23 — Live Opportunity notifications
+- Dashboard refreshes Opportunities and sourcing notifications every 30 seconds while visible.
+- Returning to the tab/window triggers an immediate refresh.
+- Opportunity refresh responses are explicitly non-cacheable.
+- No scoring or V3.9.22 calibration thresholds changed.

@@ -84,6 +84,17 @@ def _recent_observations(db, listing_uuid, limit=12, episode=None):
     return q.order('captured_at',desc=True).limit(limit).execute().data or []
 
 
+def _latest_capture_summary(raw):
+    raw=dict(raw or {})
+    keys=(
+        'captured_at','collector_version','listing_title','description','listing_mode','buy_now_nzd','asking_price_nzd','starting_price_nzd','current_bid_nzd',
+        'views','watchers','bids','close_date','close_remaining','listing_status','listing_ended','listing_end_reason','sold_detected',
+        'condition','location','seller','seller_feedback_pct','seller_feedback_count','seller_in_trade','seller_address_verified','seller_member_since',
+        'shipping_options','pickup_available','q_and_a','question_count','buy_now_available','offer_available','stock_quantity','category_path','breadcrumbs',
+        'primary_image_url','marketplace_attributes','marketplace_attribute_map','extraction_quality','_sources'
+    )
+    return {k:raw.get(k) for k in keys if k in raw}
+
 def _quarantine_unsafe_views(raw):
     raw = dict(raw or {})
     source = str((((raw.get('_sources') or {}).get('views') or {}).get('source') or ''))
@@ -119,12 +130,62 @@ def _next_relist_check(check_count):
         return None
     return (datetime.now(timezone.utc)+timedelta(hours=RELIST_CHECK_DELAYS_HOURS[i])).isoformat()
 
+def _parse_iso(v):
+    if not v:
+        return None
+    try:
+        return datetime.fromisoformat(str(v).replace('Z','+00:00'))
+    except Exception:
+        return None
+
+def same_id_relist_evidence(listing, raw, prior_history):
+    """Detect a new lifecycle episode even when COBALT never caught the brief closed page.
+
+    Trade Me can make the same marketplace ID live again quickly. The strongest evidence is an
+    elapsed previous close followed by a new future close on an active capture. Counter resets are
+    supporting evidence, never the sole trigger.
+    """
+    raw=dict(raw or {}); prior_history=list(prior_history or [])
+    if bool(raw.get('listing_ended')) or str(raw.get('listing_status') or '').lower() in {'ended','sold','removed','withdrawn'}:
+        return False,{}
+    now=datetime.now(timezone.utc)
+    current_close=_parse_iso(normalize_close_date(raw.get('close_date')))
+    latest=prior_history[0] if prior_history else {}
+    previous_close=_parse_iso(latest.get('close_date'))
+    elapsed_previous=bool(previous_close and previous_close <= now-timedelta(minutes=2))
+    future_current=bool(current_close and current_close >= now+timedelta(minutes=10))
+    close_advanced=bool(previous_close and current_close and current_close > previous_close+timedelta(minutes=30))
+
+    def reset(field, minimum_drop=1):
+        before=_number(latest.get(field)); after=_number(raw.get(field))
+        if before is None or after is None:return False
+        return before-after>=minimum_drop and after <= max(2,before*.6)
+
+    view_reset=reset('views',3)
+    bid_reset=reset('bids',1)
+    watcher_reset=reset('watchers',2)
+    prior_state=str(listing.get('lifecycle_state') or 'active')
+    state_reopened=prior_state in {'relist_watch','terminal_closed','relisted'}
+
+    detected=(state_reopened and future_current) or (elapsed_previous and future_current and close_advanced) or (elapsed_previous and (future_current or state_reopened) and view_reset)
+    evidence={
+        'same_marketplace_id':True,'prior_state':prior_state,
+        'previous_close_date':latest.get('close_date'),'current_close_date':normalize_close_date(raw.get('close_date')),
+        'previous_close_elapsed':elapsed_previous,'current_close_future':future_current,'close_date_advanced':close_advanced,
+        'views_reset':view_reset,'bids_reset':bid_reset,'watchers_reset':watcher_reset,
+        'previous_views':latest.get('views'),'current_views':raw.get('views')
+    }
+    return bool(detected),evidence
+
 def save_success(listing, raw):
     db = client(); raw=_quarantine_unsafe_views(raw); raw=dict(raw or {}); raw['capture_source']='worker-auto'
     lid=listing['id']; captured=raw.get('captured_at') or datetime.now(timezone.utc).isoformat(); q=raw.get('extraction_quality') or {}
     prior_state=str(listing.get('lifecycle_state') or 'active'); ended=effective_ended(raw)
-    reopened=prior_state in {'relist_watch','terminal_closed','relisted'} and not ended
-    episode=int(listing.get('lifecycle_episode') or 1)+(1 if reopened else 0)
+    current_episode=int(listing.get('lifecycle_episode') or 1)
+    prior_history=_recent_observations(db,lid,episode=current_episode)
+    relist_detected,relist_evidence=same_id_relist_evidence(listing,raw,prior_history) if not ended else (False,{})
+    reopened=bool(relist_detected and not ended)
+    episode=current_episode+(1 if reopened else 0)
     obs={
         'listing_uuid':lid,'captured_at':captured,'lifecycle_episode':episode,'collector_version':raw.get('collector_version'),'listing_mode':raw.get('listing_mode'),
         'buy_now_nzd':raw.get('buy_now_nzd'),'asking_price_nzd':raw.get('asking_price_nzd'),'starting_price_nzd':raw.get('starting_price_nzd'),'current_bid_nzd':raw.get('current_bid_nzd'),
@@ -133,6 +194,7 @@ def save_success(listing, raw):
         'buy_now_available':raw.get('buy_now_available'),'offer_available':raw.get('offer_available'),'stock_quantity':raw.get('stock_quantity'),'listing_status':raw.get('listing_status'),'sold_detected':raw.get('sold_detected'),
         'condition':raw.get('condition'),'location':raw.get('location'),'seller':raw.get('seller'),'seller_feedback_pct':raw.get('seller_feedback_pct'),'seller_feedback_count':raw.get('seller_feedback_count'),'seller_in_trade':raw.get('seller_in_trade'),'seller_address_verified':raw.get('seller_address_verified'),'seller_member_since':raw.get('seller_member_since'),
         'shipping_options':raw.get('shipping_options'),'pickup_available':raw.get('pickup_available'),'part_number':raw.get('part_number'),'part_number_candidates':raw.get('part_number_candidates'),'vehicle':raw.get('vehicle'),'chassis':raw.get('chassis') or raw.get('chassis_code_label'),'years':raw.get('years') or raw.get('vehicle_year_label'),'engine_code':raw.get('engine_code') or raw.get('engine_code_label'),'part_type':raw.get('part_type'),
+        'description':raw.get('description'),'category_path':raw.get('category_path'),'primary_image_url':raw.get('primary_image_url'),'marketplace_attributes':raw.get('marketplace_attributes') or [],
         'extraction_score':q.get('score',raw.get('extraction_score')),'quality_flags':q.get('warnings',raw.get('quality_flags') or []),'raw_snapshot':raw
     }
     # Repeated relist-watch probes of an already-ended page are lifecycle checks, not fresh market
@@ -141,7 +203,8 @@ def save_success(listing, raw):
     if persist_observation:
         db.table('observations').upsert(obs,on_conflict='listing_uuid,captured_at').execute()
     history=_recent_observations(db,lid,episode=episode)
-    patch={'last_seen':captured,'last_observed_at':captured,'consecutive_failures':0,'last_error':None,'title':raw.get('listing_title') or listing.get('title'),'seller':raw.get('seller') or listing.get('seller'),'last_success_source':'worker','last_relist_checked_at':captured if prior_state=='relist_watch' else listing.get('last_relist_checked_at')}
+    metadata=dict(listing.get('metadata') or {}); metadata['latest_capture']=_latest_capture_summary(raw)
+    patch={'last_seen':captured,'last_observed_at':captured,'consecutive_failures':0,'last_error':None,'title':raw.get('listing_title') or listing.get('title'),'seller':raw.get('seller') or listing.get('seller'),'metadata':metadata,'last_success_source':'worker','last_relist_checked_at':captured if prior_state in {'relist_watch','terminal_closed'} else listing.get('last_relist_checked_at')}
     if ended:
         reason=raw.get('listing_end_reason') or ('expired' if normalize_close_date(raw.get('close_date')) else 'ended')
         verdict,score,evidence=final_verdict(history,reason)
@@ -170,7 +233,7 @@ def save_success(listing, raw):
             except Exception: pass
         patch.update({'active':True,'lifecycle_state':'active','lifecycle_episode':episode,'relist_check_count':0,'relist_watch_until':None,'last_relisted_at':captured if reopened else listing.get('last_relisted_at'),'relist_match_confidence':1 if reopened else listing.get('relist_match_confidence'),'relist_detection_method':'same_marketplace_id_reopened' if reopened else listing.get('relist_detection_method'),'observation_interval_hours':hours,'priority':priority,'next_observation_at':next_dt.isoformat(),'cadence_reason':'relisted · same marketplace ID · new episode' if reopened else reason,'finalized_at':None,'final_verdict':None,'final_score':None,'final_evidence':{},'closure_reason':None})
         if reopened:
-            try: db.table('listing_lifecycle_events').insert({'listing_uuid':lid,'listing_family_id':listing.get('listing_family_id') or lid,'marketplace':listing.get('marketplace') or 'Trade Me','marketplace_listing_id':listing.get('listing_id'),'episode':episode,'event_type':'relisted_same_id','occurred_at':captured,'confidence':1,'reason':{'detected':'closed marketplace ID became live again','counter_reset_is_new_episode':True}}).execute()
+            try: db.table('listing_lifecycle_events').insert({'listing_uuid':lid,'listing_family_id':listing.get('listing_family_id') or lid,'marketplace':listing.get('marketplace') or 'Trade Me','marketplace_listing_id':listing.get('listing_id'),'episode':episode,'event_type':'relisted_same_id','occurred_at':captured,'confidence':1,'reason':{'detected':'same marketplace ID began a new live lifecycle episode','counter_reset_is_new_episode':True,**relist_evidence}}).execute()
             except Exception as e: print(f'WARNING: relist lifecycle event write failed: {e}')
     db.table('listings').update(patch).eq('id',lid).execute()
     try: db.table('collection_errors').update({'status':'resolved','resolved_at':captured,'recovered_at':captured,'recovery_source':'worker','resolution_note':'Recovered by a later successful COBALT collection.'}).eq('listing_uuid',lid).eq('status','open').execute()

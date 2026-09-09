@@ -1,0 +1,22 @@
+COBALT V3.9.21 — Opportunity Scanner Reliability Hotfix
+
+Modified:
+- .github/workflows/observe.yml
+- web/package.json
+- web/package-lock.json
+- extension-v2/manifest.json
+- docs/README.md
+- docs/SYSTEM_OVERVIEW.md
+- docs/SETUP.md
+- docs/RELEASE_HISTORY.md
+
+Added:
+- supabase/migrations/019_opportunity_service_role_grants.sql
+- CHANGED_FILES_V3.9.21.txt
+
+Key fix:
+- Migration 013 created the opportunity tables without explicit service_role table grants.
+  The scheduled scan uses a service-role Supabase client through PostgREST, so this can
+  fail with permission denied while the workflow's old continue-on-error hides the failure.
+- Opportunity scan now runs on every non-duplicate scheduler wake-up and failures are visible.
+- Opportunity thresholds are unchanged in this hotfix; first restore reliable materialisation.

@@ -12,7 +12,7 @@ COBALT is Motera's product-opportunity research system. It turns marketplace lis
 
 COBALT deliberately separates **collection**, **identity**, **market intelligence**, and **sourcing decisions**. A high view count is evidence of attention, not proof of a sale.
 
-Current release: **V3.9.19 — Relist Lineage + Historical Evidence**.
+Current release: **V3.9.21 — Generic Marketplace Lifecycle + Listing Evidence Inspector**.
 
 ## End-to-end architecture
 
@@ -276,3 +276,11 @@ The same evidence can feed My Product `Listing details`. COBALT persists one Tra
 If a listing has no trustworthy comparable cluster, COBALT does not automatically discard it. Once it has enough independent temporal evidence and unusually strong marketplace behaviour, it can enter the same opportunity inbox as a **Standalone Product Signal**.
 
 The modal clearly distinguishes this evidence class from corroborated signals, shows the independent evidence-window count, trusted velocity, buyer-intent evidence and evidence span, and warns that the sourcing recommendation carries higher market uncertainty. `Find supplier`, `Keep watching` and `Dismiss` behave exactly as they do for corroborated opportunities and never alter the underlying listing signal or observation schedule.
+
+
+## V3.9.20 generic marketplace contract
+
+COBALT treats automotive identity as optional enrichment rather than a requirement. Generic Trade Me captures preserve title, description, price/mode, views, watchers, bids, close date, status, seller facts, shipping/pickup, Q&A, category path, image and arbitrary marketplace label/value attributes when exposed. Recently ended rows remain in bounded `relist_watch`; a same marketplace ID can begin a new lifecycle episode when an elapsed close is followed by a new future close and/or a trustworthy counter reset. Explicit marketplace relist links remain authoritative for new-ID lineage.
+
+### V3.9.22 sourcing recommendation calibration
+The Opportunity engine uses recent marketplace movement, independent observation windows, observed listing age, corroborating live listings, historical support and any available buyer-intent evidence. It is intentionally asymmetric: corroborated families require fewer observations than standalone listings, while short-duration bursts are blocked. Trade Me fields such as bids/questions/watchers strengthen a lead but missing fields do not prevent a high-confidence view-based recommendation.

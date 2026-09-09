@@ -1,0 +1,18 @@
+COBALT V3.9.22 opportunity calibration
+
+Modified:
+- web/lib/opportunities.ts
+- web/scripts/test-opportunities.cjs
+- web/package.json
+- web/package-lock.json
+- extension-v2/manifest.json
+- docs/RELEASE_HISTORY.md
+- docs/README.md
+- docs/SYSTEM_OVERVIEW.md
+
+Core behaviour:
+- fewer observations can qualify only when time spacing + movement + corroboration compensate
+- 2-listing families can reach STRONG_LEAD
+- exceptional 2-listing mature families can reach SOURCE_NOW
+- sparse standalone 2-check leads are EARLY only
+- weak long-running datasets remain filtered

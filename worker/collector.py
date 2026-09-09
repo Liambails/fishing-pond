@@ -146,16 +146,18 @@ def collect_listing(url: str, headless: bool = True) -> dict:
                 collector_source=COLLECTOR_JS.read_text(encoding='utf-8'); page.evaluate(collector_source); raw=page.evaluate('window.CobaltCollect()')
             except Exception as e: raise CollectionError(str(e),'collector_execution','collector',url,page.url,page.title(),status)
             if not raw or not raw.get('listing_id'): raise CollectionError('Collector returned no listing ID','missing_listing_id','collector',url,page.url,page.title(),status)
-            # Closed listing pages can expose an explicit marketplace link to their successor.
-            # Capture the relationship as evidence; run.py decides whether a new listing needs
-            # to be registered/collected. No challenge bypass or browser-identity spoofing.
+            # Marketplace relist evidence is cheap to inspect and can appear before/after the
+            # page exposes a canonical 'ended' banner. Always look for an explicit successor link;
+            # only run the broader same-page candidate scan once the page itself is ended.
+            relist=find_explicit_relist_link(page, page.url or url, raw.get('listing_id'))
+            if relist:
+                raw['explicit_relist']=relist
             if raw.get('listing_ended'):
-                relist=find_explicit_relist_link(page, page.url or url, raw.get('listing_id'))
-                if relist:
-                    raw['explicit_relist']=relist
                 raw['relist_candidates']=find_relist_candidate_links(
                     page, page.url or url, raw.get('listing_id'), raw.get('listing_title'), limit=12
                 )
+            else:
+                raw['relist_candidates']=[]
             raw['final_url']=page.url
             return raw
         finally:

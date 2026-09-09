@@ -2,6 +2,20 @@ import {NextResponse} from 'next/server';
 import {adminClient} from '../../../lib/supabase';
 import {supplierResearchFromOpportunity} from '../../../lib/opportunities';
 
+
+export async function GET(){
+ try{
+  const db=adminClient();
+  const [{data:opportunities,error:oe},{data:notifications,error:ne},{data:links,error:le}]=await Promise.all([
+   db.from('opportunities').select('*').order('last_detected_at',{ascending:false}).limit(500),
+   db.from('opportunity_notifications').select('*').order('created_at',{ascending:false}).limit(500),
+   db.from('opportunity_listings').select('*').order('opportunity_id',{ascending:true}).limit(5000)
+  ]);
+  if(oe)throw oe;if(ne)throw ne;if(le)throw le;
+  return NextResponse.json({opportunities:opportunities||[],notifications:notifications||[],links:links||[]},{headers:{'Cache-Control':'no-store, max-age=0'}});
+ }catch(e:any){return NextResponse.json({error:e.message||'Unable to load opportunities.'},{status:500,headers:{'Cache-Control':'no-store, max-age=0'}})}
+}
+
 export async function PATCH(req:Request){
  try{
   const {opportunityId,action,notificationId}=await req.json();const db=adminClient();const now=new Date().toISOString();

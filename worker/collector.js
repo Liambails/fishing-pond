@@ -1,7 +1,7 @@
 window.CobaltCollect = async function() {
-  // COBALT Trade Me DOM Collector v1.5.5
+  // COBALT Trade Me DOM Collector v1.5.6
   // Current manually-opened page only. No crawling, navigation, or remote fetches.
-  const VERSION = "1.5.5";
+  const VERSION = "1.5.6";
   const $ = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => [...r.querySelectorAll(s)];
   const clean = v => String(v ?? "").trim().replace(/\s+/g, " ");
@@ -257,9 +257,48 @@ window.CobaltCollect = async function() {
   const pickup=shipRows.some(x=>/pick-?up/i.test(x.description||''))||/Pick-?up available/i.test(txt(shipRoot));
   put('shipping_options',shipRows,shipRoot?'shipping-table':null,.97); put('pickup_available',pickup,shipRoot?'shipping-table':null,.97);
 
+  // Generic marketplace label/value facts. These deliberately avoid category-specific schemas.
+  // COBALT stores the marketplace's own labels so a patio umbrella, laptop, toy or car part can
+  // expose useful facts without pretending every listing has automotive fields.
+  const marketplaceAttributes=[];
+  const attrSeen=new Set();
+  const addMarketplaceAttribute=(label,value,source)=>{
+    label=clean(label).replace(/[:\s]+$/,''); value=clean(value);
+    if(!label||!value||label.length>90||value.length>800)return;
+    if(label.toLowerCase()===value.toLowerCase())return;
+    const key=(label+'\u0000'+value).toLowerCase(); if(attrSeen.has(key))return; attrSeen.add(key);
+    marketplaceAttributes.push({label,value,source});
+  };
+  for(const row of $$('dl')){
+    const dts=$$('dt',row),dds=$$('dd',row);
+    for(let i=0;i<Math.min(dts.length,dds.length);i++)addMarketplaceAttribute(txt(dts[i]),txt(dds[i]),'definition-list');
+  }
+  for(const row of $$('tg-rack-item, tm-core-seller-details tg-rack-item, [class*="listing-attribute"], [data-testid*="attribute" i]')){
+    const label=txt($('.o-rack-item__primary-body, tg-rack-item-primary, [class*="label"], [data-testid*="label" i]',row));
+    const value=txt($('.o-rack-item__secondary, tg-rack-item-secondary, [class*="value"], [data-testid*="value" i]',row));
+    if(label&&value)addMarketplaceAttribute(label,value,'label-value-row');
+  }
+  for(const row of $$('table tr')){
+    const cells=$$('th,td',row).map(txt).filter(Boolean);
+    if(cells.length===2)addMarketplaceAttribute(cells[0],cells[1],'table-row');
+  }
+  const attributeMap={};
+  for(const a of marketplaceAttributes){if(attributeMap[a.label]===undefined)attributeMap[a.label]=a.value;}
+  put('marketplace_attributes',marketplaceAttributes,marketplaceAttributes.length?'generic:label-value':null,.96);
+  put('marketplace_attribute_map',attributeMap,marketplaceAttributes.length?'derived:label-value-map':null,.94);
+  const attrValue=(patterns)=>{for(const a of marketplaceAttributes){if(patterns.some(rx=>rx.test(a.label)))return a.value;}return null;};
+
+  // Backfill generic fields only when the primary extractor did not find them.
+  if(record.location==null){const v=attrValue([/^location$/i,/seller\s+location/i,/located\s+in/i]);if(v)put('location',v,'marketplace-attribute:location',.94);}
+  if(record.condition==null){const v=attrValue([/^condition$/i,/item\s+condition/i]);if(v)put('condition',v,'marketplace-attribute:condition',.96);}
+  if(record.views==null){const v=attrValue([/^page\s+views?$/i,/^views?$/i]);const n=v&&v.match(/[\d,]+/);if(n)put('views',Number(n[0].replace(/,/g,'')),'marketplace-attribute:views',.98);}
+  if(record.watchers==null){const v=attrValue([/^watchers?$/i,/^watching$/i]);const n=v&&v.match(/[\d,]+/);if(n)put('watchers',Number(n[0].replace(/,/g,'')),'marketplace-attribute:watchers',.94);}
+  if(record.bids==null){const v=attrValue([/^bids?$/i,/bid\s+count/i]);const n=v&&v.match(/[\d,]+/);if(n)put('bids',Number(n[0].replace(/,/g,'')),'marketplace-attribute:bids',.95);}
+  if(record.close_date==null){const v=attrValue([/^closes?$/i,/closing\s+(?:date|time)/i,/^ends?$/i]);if(v)put('close_date',v,'marketplace-attribute:close',.95);}
+
   // Condition: conservative explicit inference only.
-  let condition=null, conditionSource=null;
-  if(product?.itemCondition){condition=String(product.itemCondition).replace(/^https?:\/\/schema.org\//,'').replace(/Condition$/,'');conditionSource='jsonld:itemCondition';}
+  let condition=record.condition, conditionSource=record.condition?'marketplace-attribute:condition':null;
+  if(!condition && product?.itemCondition){condition=String(product.itemCondition).replace(/^https?:\/\/schema.org\//,'').replace(/Condition$/,'');conditionSource='jsonld:itemCondition';}
   const desc=record.description||'';
   if(!condition){const m=desc.match(/\bCondition\s*:?\s*(New|Used|Refurbished)\b/i);if(m){condition=m[1];conditionSource='description:label';}}
   if(!condition && /\b(?:second[- ]hand|used part|listed for sale is .* used|\bUsed\b)/i.test(desc)){condition='Used';conditionSource='description:explicit-used';}

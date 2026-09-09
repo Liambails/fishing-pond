@@ -275,6 +275,30 @@ export default function Dashboard({products,listings,interventions:initialErrors
  async function loadDailyBrief(force=false){if(!aiEnabled){setDailyBrief({summary:fallbackBrief,cached:true,ai:false});return}try{const r=await fetch('/api/ai/daily-summary',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({force})});const j=await r.json();setDailyBrief(r.ok?j:{summary:fallbackBrief,ai:false,error:j.error})}catch{setDailyBrief({summary:fallbackBrief,ai:false})}}
  useEffect(()=>{loadDailyBrief(false)},[]);
  useEffect(()=>{setClock(new Date());const t=setInterval(()=>setClock(new Date()),1000);return()=>clearInterval(t)},[]);
+ // Keep the sourcing bell live while the dashboard is open. The server-side scanner still
+ // decides what qualifies; this only refreshes newly materialised opportunities/notifications.
+ useEffect(()=>{
+  let cancelled=false;let inFlight=false;
+  const refreshOpportunities=async()=>{
+   if(cancelled||inFlight||document.visibilityState==='hidden')return;
+   inFlight=true;
+   try{
+    const r=await fetch('/api/opportunities',{cache:'no-store'});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.error||'Unable to refresh opportunities');
+    if(cancelled)return;
+    const links=Array.isArray(j.links)?j.links:[];
+    const fresh=(Array.isArray(j.opportunities)?j.opportunities:[]).map((o:any)=>({...o,listings:links.filter((x:any)=>x.opportunity_id===o.id).map((x:any)=>({...x,listing:listings.find((l:any)=>l.id===x.listing_uuid)})).filter((x:any)=>x.listing)}));
+    setOpportunities(fresh);
+    setOpportunityNotifications(Array.isArray(j.notifications)?j.notifications:[]);
+   }catch(e){console.warn('Opportunity refresh failed',e)}finally{inFlight=false}
+  };
+  const timer=window.setInterval(refreshOpportunities,30000);
+  const onVisible=()=>{if(document.visibilityState==='visible')refreshOpportunities()};
+  const onFocus=()=>refreshOpportunities();
+  document.addEventListener('visibilitychange',onVisible);window.addEventListener('focus',onFocus);
+  return()=>{cancelled=true;window.clearInterval(timer);document.removeEventListener('visibilitychange',onVisible);window.removeEventListener('focus',onFocus)};
+ },[listings]);
  // Research signals never create commercial products automatically. Opportunities are leads;
  // the operator decides when supplier research should move into My Products.
 
