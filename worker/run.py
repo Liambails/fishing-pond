@@ -10,6 +10,10 @@ load_dotenv(); MAX=int(os.getenv('MAX_LISTINGS_PER_RUN','12')); HEADLESS=os.gete
 
 def iso_now(): return datetime.now(timezone.utc).isoformat()
 
+
+def collect_listing_preferred(listing,headless=True):
+ return collect_listing(listing['url'],headless),'playwright'
+
 def run_matcher_for_listing(listing_uuid):
  url=os.getenv('COBALT_WEB_URL','https://fishing-pond-seven.vercel.app').rstrip('/')+'/api/products/reconcile'
  token=os.getenv('COBALT_INGEST_TOKEN') or os.getenv('FISHING_POND_INGEST_TOKEN')
@@ -96,6 +100,32 @@ def detect_relist_from_capture(listing,raw,db,headless,run_id=None):
   return {'listing_id':child.get('listing_id'),'created':created,'source':'ended_page_semantic','confidence':match.score,'capture':'success','views':child_raw.get('views'),'reasons':match.reasons,'candidates':diagnostics[:6]}
  return {'source':'ended_page_candidates','linked':False,'candidates':diagnostics[:6]}
 
+
+def detect_search_watch_relist(listing,raw,db):
+ if str(listing.get('discovered_via') or '')!='browser_search' or listing.get('relisted_from'):
+  return None
+ seller=str(raw.get('seller') or listing.get('seller') or '').strip()
+ if not seller:return None
+ try:
+  parents=(db.table('listings').select('*').eq('marketplace',listing.get('marketplace') or 'Trade Me').neq('id',listing['id']).in_('lifecycle_state',['relist_watch','terminal_closed','relisted']).order('finalized_at',desc=True).limit(120).execute().data or [])
+ except Exception:
+  return None
+ matches=[]
+ candidate={'listing_id':listing.get('listing_id'),'url':listing.get('url'),'title':raw.get('listing_title') or listing.get('title'),'seller':seller,'metadata':{'category_path':raw.get('category_path') or []}}
+ candidate_obs={**raw,'raw_snapshot':raw}
+ for parent in parents:
+  if str(parent.get('seller') or '').strip().lower()!=seller.lower():continue
+  parent_obs=_latest_parent_observation(db,parent)
+  match=compare_relist(candidate,candidate_obs,parent,parent_obs,method='search_watch_semantic')
+  matches.append((parent,match))
+ best,ranked=pick_best_relist(matches)
+ if not best:return None
+ parent,match=best
+ child,created=register_relist_successor(parent,candidate,'search_watch_semantic',match.score,match.reasons)
+ if not child:return None
+ listing.update(child)
+ return {'listing_id':listing.get('listing_id'),'created':created,'source':'search_watch_semantic','confidence':match.score,'reasons':match.reasons}
+
 def main():
  started=iso_now(); db=client(); selected=[]; run=None
  try:
@@ -114,7 +144,7 @@ def main():
    attempted+=1; item_started=time.monotonic(); before_due=listing.get('next_observation_at')
    print(f"Opening {listing['listing_id']} priority={listing.get('priority')} due={before_due}")
    try:
-    raw=collect_listing(listing['url'],HEADLESS)
+    raw,acquisition_source=collect_listing_preferred(listing,HEADLESS)
     observed_id=str(raw.get('listing_id') or marketplace_listing_id(raw.get('final_url')) or '')
     relist_result=None
     if observed_id and observed_id!=str(listing.get('listing_id') or ''):
@@ -122,19 +152,31 @@ def main():
      # ended parent UUID.
      relist_result=detect_relist_from_capture(listing,raw,db,HEADLESS,run['id']); match_result=None
     else:
+     search_relist=detect_search_watch_relist(listing,raw,db) if str(listing.get('discovered_via') or '')=='browser_search' else None
      save_success(listing,raw); match_result=run_matcher_for_listing(listing['id'])
+     if str(listing.get('discovered_via') or '')=='browser_search':
+      try:
+       db.table('listings').update({'last_acquisition_status':'success','last_acquisition_error_type':None,'last_acquisition_event_at':iso_now()}).eq('id',listing['id']).execute()
+       db.table('listing_acquisition_events').insert({'listing_uuid':listing['id'],'operation':'listing_detail','source':'playwright','status':'success','occurred_at':iso_now(),'duration_ms':int((time.monotonic()-item_started)*1000),'diagnostics':{'views':raw.get('views'),'price':raw.get('buy_now_nzd') or raw.get('asking_price_nzd')}}).execute()
+      except Exception as acquisition_log_e: print(f'WARNING: acquisition telemetry write failed: {acquisition_log_e}')
+     if search_relist: relist_result=search_relist
      # Persist the closure first, then inspect explicit/semantic successor candidates.
      if effective_ended(raw):
       relist_result=detect_relist_from_capture(listing,raw,db,HEADLESS,run['id'])
     ok+=1
     after=(db.table('listings').select('next_observation_at,observation_interval_hours,cadence_reason').eq('id',listing['id']).limit(1).execute().data or [{}])[0]
     duration_ms=int((time.monotonic()-item_started)*1000)
-    print(f"SUCCESS {listing['listing_id']} views={raw.get('views')} duration={duration_ms}ms")
-    details.append({'listing_id':listing['listing_id'],'ok':True,'views':raw.get('views'),'price':raw.get('buy_now_nzd') or raw.get('asking_price_nzd'),'due_at_before':before_due,'next_observation_at_after':after.get('next_observation_at'),'interval_hours_after':after.get('observation_interval_hours'),'cadence_reason_after':after.get('cadence_reason'),'duration_ms':duration_ms,'matcher':match_result,'explicit_relist':relist_result})
+    print(f"SUCCESS {listing['listing_id']} source={acquisition_source} views={raw.get('views')} duration={duration_ms}ms")
+    details.append({'listing_id':listing['listing_id'],'ok':True,'views':raw.get('views'),'price':raw.get('buy_now_nzd') or raw.get('asking_price_nzd'),'due_at_before':before_due,'next_observation_at_after':after.get('next_observation_at'),'interval_hours_after':after.get('observation_interval_hours'),'cadence_reason_after':after.get('cadence_reason'),'duration_ms':duration_ms,'acquisition_source':acquisition_source,'matcher':match_result,'explicit_relist':relist_result})
    except Exception as e:
     failed+=1; failures=save_failure(listing,e); duration_ms=int((time.monotonic()-item_started)*1000)
     after=(db.table('listings').select('next_observation_at,observation_interval_hours,cadence_reason,last_error').eq('id',listing['id']).limit(1).execute().data or [{}])[0]
     error_type=getattr(e,'error_type',e.__class__.__name__)
+    if str(listing.get('discovered_via') or '')=='browser_search':
+     try:
+      db.table('listings').update({'last_acquisition_status':'failed','last_acquisition_error_type':error_type,'last_acquisition_event_at':iso_now()}).eq('id',listing['id']).execute()
+      db.table('listing_acquisition_events').insert({'listing_uuid':listing['id'],'operation':'listing_detail','source':'playwright','status':'failed','occurred_at':iso_now(),'duration_ms':duration_ms,'error_type':error_type,'error_message':str(e)[:1500],'diagnostics':{'stage':getattr(e,'stage',None),'http_status':getattr(e,'http_status',None)}}).execute()
+     except Exception as acquisition_log_e: print(f'WARNING: failed to write acquisition telemetry: {acquisition_log_e}')
     print(f"FAILED {listing['listing_id']} [{error_type}] {e}")
     try: log_collection_error(listing,e,run['id'],failures)
     except Exception as log_e: print(f'WARNING: failed to write collection_errors row: {log_e}')

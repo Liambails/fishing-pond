@@ -1,0 +1,12 @@
+COBALT V3.10.5
+
+- Search Terms moved off the dashboard to /search-watches.
+- Search Terms page simplified to one input + Add and a run/discovery telemetry table.
+- Global noindex/nofollow/noarchive/nosnippet headers + robots.txt disallow all crawling.
+- Search Terms API now explains when migrations 020/021 are missing.
+- Confirmed sold listings now corroborate family Opportunities after they become inactive.
+- A sale strengthens demand evidence but cannot create SOURCE_NOW or a family opportunity by itself.
+- Family Why text now reports buyer evidence only when actually present.
+- Added Next outputFileTracingRoot to avoid the parent lockfile tracing warning.
+- CSS flex-end compatibility warning cleaned up.
+- No new database migration.

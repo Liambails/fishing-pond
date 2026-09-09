@@ -1,0 +1,19 @@
+COBALT V3.10.1 browser Search Watches update
+
+web/components/Dashboard.tsx
+web/components/SearchWatches.tsx
+web/package.json
+web/package-lock.json
+worker/search_watches.py
+worker/test_search_watches.py
+worker/run.py
+worker/db.py
+.github/workflows/observe.yml
+supabase/migrations/020_search_watches_and_api_telemetry.sql
+supabase/migrations/021_browser_search_acquisition_telemetry.sql
+extension-v2/collector.js
+extension-v2/manifest.json
+worker/collector.js
+docs/README.md
+docs/RELEASE_HISTORY.md
+CHANGED_FILES_V3.10.1.txt

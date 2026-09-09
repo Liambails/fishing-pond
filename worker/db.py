@@ -112,7 +112,7 @@ def _quarantine_unsafe_views(raw):
 RELIST_CHECK_DELAYS_HOURS=(1,6,18,48,96)
 
 def effective_ended(raw):
-    if bool((raw or {}).get('listing_ended')):
+    if bool((raw or {}).get('listing_ended')) or str((raw or {}).get('listing_status') or '').lower() in {'sold','ended','removed','withdrawn'}:
         return True
     close=normalize_close_date((raw or {}).get('close_date'))
     if not close:

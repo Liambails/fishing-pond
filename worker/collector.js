@@ -1,7 +1,7 @@
 window.CobaltCollect = async function() {
-  // COBALT Trade Me DOM Collector v1.5.6
+  // COBALT Trade Me DOM Collector v1.5.8
   // Current manually-opened page only. No crawling, navigation, or remote fetches.
-  const VERSION = "1.5.6";
+  const VERSION = "1.5.8";
   const $ = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => [...r.querySelectorAll(s)];
   const clean = v => String(v ?? "").trim().replace(/\s+/g, " ");
@@ -172,16 +172,36 @@ window.CobaltCollect = async function() {
       const label=clean(el.getAttribute('aria-label')||el.getAttribute('title'));
       const n=parseViewsText(label); if(n!=null)return {value:n,source:'attribute:view-label'};
     }
-    // Deliberately no document.body fallback. Missing is safer than a fabricated counter.
+    // Marketplace templates such as Home & Living can render a plain footer row like
+    // "Page views: 32" without a stable class/test-id. Inspect only small local elements whose
+    // OWN text explicitly contains the label. This is intentionally not a whole-document
+    // number fallback: the number and the word views must be in the same short element.
+    for(const el of $$('span,p,li,div')){
+      const own=txt(el); if(!own || own.length>90 || !/\b(?:page\s+)?views?\b/i.test(own))continue;
+      const childText=[...el.children].map(txt).filter(Boolean).join(' ');
+      // Avoid broad wrapper elements whose text is mainly inherited from many descendants.
+      if(el.children.length>4 || (childText && own.length>childText.length+50))continue;
+      const n=parseViewsText(own); if(n!=null && n>=0)return {value:n,source:'local-labelled-element:views'};
+    }
+    // Deliberately no document.body numeric fallback. Missing is safer than a fabricated counter.
     return {value:null,source:null};
   };
   const viewRead=readViews();
   let views=viewRead.value;
   put('views',views,viewRead.source,views!=null?.98:0);
-  let watchers=null; let wm=pageText.match(/([\d,]+)\s+(?:people\s+)?watching\b|Watchers?:\s*([\d,]+)/i); if(wm)watchers=Number((wm[1]||wm[2]).replace(/,/g,''));
-  put('watchers',watchers,watchers!=null?'page-text':null,.82);
-  let bids=null; if(/\bNo bids\b/i.test(priceArea))bids=0; else {let bm=priceArea.match(/([\d,]+)\s+bids?\b|Bids?:\s*([\d,]+)/i);if(bm)bids=Number((bm[1]||bm[2]).replace(/,/g,''));}
-  put('bids',bids,bids!=null?'pricing-text':null,.9);
+  // Public buyer-behaviour counters. Absence is UNKNOWN, never zero. Trade Me currently
+  // exposes watcher counts on some templates as "359 others watchlisted" and auction counts
+  // as "54 bids so far". Fixed-price/category templates may expose neither.
+  let watchers=null;
+  const wm=pageText.match(/([\d,]+)\s+(?:other(?:s)?\s+)?watchlisted\b|([\d,]+)\s+(?:people\s+)?watching\b|Watchers?:\s*([\d,]+)/i);
+  if(wm)watchers=Number((wm[1]||wm[2]||wm[3]).replace(/,/g,''));
+  put('watchers',watchers,watchers!=null?'page-text:public-watch-count':null,.98);
+  let bids=null;
+  if(/\bNo bids\b/i.test(priceArea))bids=0;
+  else {const bm=priceArea.match(/([\d,]+)\s+bids?(?:\s+so\s+far)?\b|Bids?:\s*([\d,]+)/i);if(bm)bids=Number((bm[1]||bm[2]).replace(/,/g,''));}
+  put('bids',bids,bids!=null?(bids===0?'pricing-text:explicit-no-bids':'pricing-text:public-bid-count'):null,.98);
+  const reserveMet=/\bReserve met\b/i.test(priceArea);
+  put('reserve_met',reserveMet,'pricing-text:reserve-state',.94);
 
   // Additional marketplace intent signals. Only record values Trade Me exposes on the
   // listing page; never infer private offer counts or sales from views.
@@ -224,10 +244,22 @@ window.CobaltCollect = async function() {
   put('condition_questions',conditionQuestions,qa.length?'derived:q-and-a':null,.86);
   put('qa_identity_codes',qaCodes,qaCodes.length?'derived:q-and-a:identifier-pattern':null,.78);
 
-  // Explicit conversion/status evidence only. A closed listing is not automatically sold.
-  const soldDetected=/\b(?:this (?:item|listing|auction) (?:has )?sold|item has sold|auction (?:has been )?won|sold for \$[\d,]+|winning bid)\b/i.test(pageText);
+  // Explicit conversion/status evidence only. A closed listing is NOT automatically sold.
+  // Keep the phrases narrow because Trade Me's global footer itself contains text such as
+  // "Sold Properties". Auction-specific evidence (won/winning bid/sold for) is decisive.
+  const soldPatterns=[
+    /\bthis (?:item|listing|auction) (?:has )?(?:been )?sold\b/i,
+    /\bitem (?:has )?(?:been )?sold\b/i,
+    /\bauction (?:has been |was )?won\b/i,
+    /\byou won (?:this|the) auction\b/i,
+    /\bwon by\b/i,
+    /\bsold for \$[\d,]+(?:\.\d{1,2})?\b/i,
+    /\bwinning bid(?:der)?\b/i
+  ];
+  const soldMatch=soldPatterns.find(rx=>rx.test(pageText))||null;
+  const soldDetected=Boolean(soldMatch);
   const listingStatus=soldDetected?'sold':listingEnded?'ended':'active';
-  put('sold_detected',soldDetected,soldDetected?'page-text:explicit-sold':null,.94);
+  put('sold_detected',soldDetected,soldDetected?'page-text:explicit-sale-outcome':null,.98);
   put('listing_status',listingStatus,'derived:explicit-page-state',.94);
 
   // Seller: exact semantic children, never whole-block prefix parsing unless final fallback.

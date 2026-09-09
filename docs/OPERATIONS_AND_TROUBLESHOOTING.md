@@ -332,3 +332,14 @@ order by occurred_at;
 A recently ended listing should normally have `lifecycle_state = relist_watch`, `active = false`, and a non-null `next_observation_at` until the bounded 1/6/18/48/96-hour watch sequence or ten-day window is exhausted. The dashboard intentionally shows this as `Relist watch`, not `Stopped`. Same-ID relists may be detected even if COBALT missed the transient closed page: the strongest signal is an elapsed previous close followed by a new future close on the same marketplace ID; a large view reset is supporting evidence and never a sole trigger. For new-ID relists, the worker first trusts an explicit Trade Me relist link/redirect whose destination resolves to `/listing/<id>`, then verifies the successor.
 
 Generic marketplace captures persist `description`, `category_path`, `primary_image_url`, and `marketplace_attributes` on observations, with the complete collector envelope retained in `raw_snapshot`. Missing fields must remain missing rather than being fabricated; marketplace label/value attributes are used to backfill generic fields only when the primary extractor did not find them.
+
+### Search Watch / Trade Me API diagnostics
+
+1. Apply `020_search_watches_and_api_telemetry.sql` before enabling Search Watches.
+2. Add approved Trade Me application credentials to GitHub Actions as `TRADEME_CONSUMER_KEY` and `TRADEME_CONSUMER_SECRET`.
+3. Create a Search Watch in the COBALT dashboard and use **Run next wake**.
+4. On the next AWS/GitHub scheduler wake, the `Run due Search Watches` step writes a durable `search_watch_runs` row.
+5. `API ✓` on a listing means an official listing-detail call successfully produced an observation. `API !` means the API call failed; inspect the error type/HTTP status in Search Watches and Issues.
+6. `trademe_api_unauthorized` usually means credentials/approval are wrong; `trademe_api_rate_limited` means reduce workload or request an appropriate rate limit; `trademe_api_permission_denied` means the application's Approved Purpose does not permit the request. COBALT does not attempt to bypass access controls.
+
+For sandbox testing, create a GitHub Actions repository variable named `TRADEME_API_BASE_URL` with value `https://api.tmsandbox.co.nz` and use sandbox Consumer Key/Secret values. Remove the variable (or leave it unset) for production; COBALT defaults to `https://api.trademe.co.nz`.

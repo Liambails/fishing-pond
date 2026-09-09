@@ -1,3 +1,9 @@
+## V3.10.5 — Search Terms isolation and conversion evidence
+- Separate noindex Search Terms page at `/search-watches`.
+- Confirmed sales now corroborate product families after listings end; a sale is supporting conversion evidence, not an automatic SOURCE_NOW trigger.
+- Global crawler exclusion and Search Terms migration diagnostics.
+- No schema migration beyond 021.
+
 # V3.9.21 — Opportunity Scanner Reliability Hotfix
 
 - Grants `service_role` CRUD access to `opportunities`, `opportunity_listings`, and `opportunity_notifications`; migration 013 created these tables without explicit grants, which can make the API scan fail through PostgREST.
@@ -281,3 +287,56 @@ V3.9.12 adds a durable cross-listing opportunity layer above the Observation Que
 - Adds an explicit preflight failure when `COBALT_INGEST_TOKEN` is missing from GitHub Actions.
 - A HTTP 401 from `/api/opportunities/scan` still requires the GitHub Actions and Vercel production `COBALT_INGEST_TOKEN` values to match; secrets are intentionally not embedded in source.
 
+
+## V3.10.0 — Search Watches + official Trade Me API acquisition
+
+- Added category-agnostic Search Watches. Operators define the marketplace query; COBALT does not hard-code automotive part names.
+- Added Trade Me official General Search integration for discovery and official listing-detail observations for price, views, bids and listing state when API credentials are configured.
+- New search discoveries are deduplicated by marketplace/listing ID and scheduled for their first detail observation within 60 minutes using deterministic workload spreading.
+- Search-discovered listings feed the existing Observation Queue, similarity engine, Opportunity engine and relist lineage logic.
+- Added conservative search-discovered relist matching after the first official API detail capture. Seller identity remains a hard gate and the existing ambiguity threshold is retained.
+- Added Search Watch run telemetry and per-listing acquisition events. Listings show API status in the Observation Queue so API success/failure is visible without opening GitHub Actions.
+- API failures are classified (not configured, unauthorized, permission denied, rate limited, network/upstream) and stored rather than silently falling back or attempting challenge bypasses.
+- Trade Me listing detail calls set `increment_view_count=false`, preventing COBALT's own API observation from increasing the view signal it measures.
+- Manual Trade Me collector upgraded to 1.5.7 with a narrow same-element `Page views: N` fallback for Marketplace templates such as Home & Living. The unsafe whole-document numeric view fallback remains removed.
+
+## V3.10.1 — Browser Search Watches (no Trade Me API)
+- Search Watches now use the same Playwright/browser acquisition approach as scheduled listing observations; no Trade Me API credentials are required.
+- Search discovery remains category-agnostic: the user chooses a search phrase and COBALT records listing IDs returned by that marketplace search, regardless of product type.
+- Search pages stop and log a failed run when Trade Me presents CAPTCHA, access-denied, human-verification, unusual-traffic, HTTP-error, or incomplete-page states. COBALT does not attempt to bypass challenges.
+- Newly discovered listings are deduplicated into the canonical queue and their first detailed observation is distributed across the following hour to smooth worker load.
+- Queue acquisition badges are now `SEARCH ·`, `SEARCH ✓`, and `SEARCH !` rather than API-specific labels.
+- Search discovery and subsequent detail-collection success/failure are written to acquisition telemetry, allowing discovery failures to be distinguished from listing-detail failures.
+- Search Watch browser execution only installs/launches Chromium when either a listing observation or Search Watch is due.
+
+## V3.10.2 — Semantic pagination + scheduler failure isolation
+
+- Search Watches now construct only the first Trade Me search URL. Every subsequent page is discovered from the rendered page itself.
+- Pagination discovery is CSS-class agnostic: it evaluates rendered link/button semantics such as `rel=next`, accessible next-page labels, incrementing numeric page links, pagination navigation context, and page-number query targets.
+- Search runs record which semantic pagination signal was selected and why, plus the exact next URL where available.
+- Pagination stops safely when no semantic next/increment control exists, the next control does not advance the page, no unseen listing IDs remain, or `max_pages` is reached.
+- Opportunity scanning accepts either the current `COBALT_INGEST_TOKEN` GitHub secret or legacy `FISHING_POND_INGEST_TOKEN`.
+- A missing GitHub ingest token no longer marks an otherwise successful observation/Search Watch workflow as failed. The Opportunity scan is explicitly logged as skipped and ordinary collection remains green.
+- Trade Me API environment variables are removed from the observation workflow; V3.10.2 remains browser-only.
+- Expanded Search Watch regression tests cover automotive/non-automotive searches, semantic next links, numeric pagination, button pagination, disabled controls, and listing-link rejection.
+
+## V3.10.3 — Relist filtering + mature view-family opportunity calibration
+
+- Observation Queue now has an independent **Relist** filter: All, Relisted / lineage, Not relisted.
+- Relist filtering is orthogonal to lifecycle status. `Active + Relisted / lineage` shows current successors/reopened episodes; `Ended / expired + Relisted / lineage` shows ended parents that have a known successor/history marker.
+- New-ID successors, same-ID lifecycle episodes, ended parents with `relist_successor_uuid`, explicit `relisted` lifecycle state, and historical `last_relisted_at` markers are all treated as relist-lineage records.
+- Opportunity calibration adds a conservative broad-view `SOURCE_NOW` path for coherent product families when watcher/bid fields are absent: at least 5 live positive listings, 4 mature listings, median 4 independent windows, 36h family span, 30h median listing age, demand score >=52, >=24 combined recent views, best listing >=6 recent views, and median trusted pace >=1.5/day.
+- This does not loosen weak-family gates. Large families with weak recent movement still return no opportunity, and near-threshold broad families remain STRONG rather than SOURCE_NOW.
+- Regression fixtures were updated using the shape of the 2026-09-09 production export, including mature Vitz tail-light and Colorado window-switch families where view evidence is rich but buyer fields are sparse.
+- Added Observation Queue relist-filter regression coverage.
+- No database schema change is required for V3.10.3.
+
+## V3.10.4 — Buyer behaviour + explicit sale outcomes
+- Trade Me public watcher extraction now recognises `N others watchlisted` as well as older watching/watcher labels.
+- Bid extraction recognises `N bids so far`; explicit `No bids` is zero, while missing bid text remains null/unknown.
+- Current bid continues to be captured independently from bid count.
+- Sold detection uses narrow auction/listing outcome phrases (`item/listing sold`, `auction won`, `won by`, `sold for $N`, `winning bid`) and deliberately ignores generic footer text such as `Sold Properties`.
+- Watchlists, bids, buyer-intent Q&A and sold confirmations now contribute to family Opportunity evidence when publicly available; missing counters are never inferred as zero.
+- Observation Queue Why explanations prioritise the actual evidence that changed: bids, watchlists, Q&A, sold outcome, peer corroboration, then views.
+- Added `worker/backfill_buyer_signals.py` for an operator-triggered one-time refresh of existing active listings using the normal collector/save path. It does not bypass marketplace challenges and does not manufacture independent evidence windows.
+- No database migration is required for V3.10.4; existing observation columns already store watchers, bids, current bid and sold detection.

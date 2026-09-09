@@ -19,6 +19,7 @@ jobs:
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       COBALT_WEB_URL: 'https://fishing-pond-seven.vercel.app'
       COBALT_INGEST_TOKEN: ${{ secrets.COBALT_INGEST_TOKEN }}
+      FISHING_POND_INGEST_TOKEN: ${{ secrets.FISHING_POND_INGEST_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -67,6 +68,24 @@ jobs:
           fi
           python scheduler_telemetry.py dependencies_ok || true
 
+      - name: Check whether Search Watches are due
+        if: steps.dispatch_guard.outputs.duplicate != 'true'
+        id: search_due
+        shell: bash
+        run: |
+          set +e
+          python search_watches.py --due-check 2>&1 | tee -a scheduler_debug.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" = "0" ]; then
+            echo "due=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "3" ]; then
+            echo "due=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Search Watch due-check failed." | tee -a scheduler_debug.log
+            echo "due=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check whether anything is due
         if: steps.dispatch_guard.outputs.duplicate != 'true'
         id: due
@@ -93,13 +112,24 @@ jobs:
           fi
 
       - name: Install Chromium
-        if: steps.dispatch_guard.outputs.duplicate != 'true' && steps.due.outputs.due == 'true'
+        if: steps.dispatch_guard.outputs.duplicate != 'true' && (steps.due.outputs.due == 'true' || steps.search_due.outputs.due == 'true')
         shell: bash
         run: |
           set -o pipefail
           if ! python -m playwright install --with-deps chromium 2>&1 | tee -a scheduler_debug.log; then
             python scheduler_telemetry.py chromium_failed "playwright chromium install failed" || true
             exit 1
+          fi
+
+      - name: Run due Search Watches
+        if: steps.dispatch_guard.outputs.duplicate != 'true' && steps.search_due.outputs.due == 'true'
+        shell: bash
+        env:
+          HEADLESS: 'true'
+        run: |
+          set -o pipefail
+          if ! python search_watches.py 2>&1 | tee -a scheduler_debug.log; then
+            echo "Search Watch runner failed; ordinary listing observations will continue." | tee -a scheduler_debug.log
           fi
 
       - name: Collect due listings
@@ -122,15 +152,17 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          if [ -z "${COBALT_INGEST_TOKEN:-}" ]; then
-            echo "COBALT_INGEST_TOKEN is not configured in GitHub Actions." | tee -a scheduler_debug.log
-            python scheduler_telemetry.py opportunity_scan_failed "GitHub COBALT_INGEST_TOKEN missing" || true
-            exit 1
+          SCAN_TOKEN="${COBALT_INGEST_TOKEN:-${FISHING_POND_INGEST_TOKEN:-}}"
+          if [ -z "$SCAN_TOKEN" ]; then
+            echo "WARNING: Opportunity scan skipped because neither COBALT_INGEST_TOKEN nor legacy FISHING_POND_INGEST_TOKEN is configured in GitHub Actions." | tee -a scheduler_debug.log
+            echo "Ordinary observations/Search Watches are unaffected; add a matching GitHub Actions secret to enable Opportunity scans." | tee -a scheduler_debug.log
+            python scheduler_telemetry.py opportunity_scan_skipped "GitHub ingest token missing" || true
+            exit 0
           fi
           response_file="$(mktemp)"
           if curl --fail-with-body --silent --show-error \
             -X POST "$COBALT_WEB_URL/api/opportunities/scan" \
-            -H "x-cobalt-token: $COBALT_INGEST_TOKEN" \
+            -H "x-cobalt-token: $SCAN_TOKEN" \
             -H "content-type: application/json" \
             -d '{}' \
             -o "$response_file"; then

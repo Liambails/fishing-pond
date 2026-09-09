@@ -1,7 +1,7 @@
 window.CobaltCollect = async function() {
-  // COBALT Trade Me DOM Collector v1.5.6
+  // COBALT Trade Me DOM Collector v1.5.7
   // Current manually-opened page only. No crawling, navigation, or remote fetches.
-  const VERSION = "1.5.6";
+  const VERSION = "1.5.7";
   const $ = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => [...r.querySelectorAll(s)];
   const clean = v => String(v ?? "").trim().replace(/\s+/g, " ");
@@ -172,7 +172,18 @@ window.CobaltCollect = async function() {
       const label=clean(el.getAttribute('aria-label')||el.getAttribute('title'));
       const n=parseViewsText(label); if(n!=null)return {value:n,source:'attribute:view-label'};
     }
-    // Deliberately no document.body fallback. Missing is safer than a fabricated counter.
+    // Marketplace templates such as Home & Living can render a plain footer row like
+    // "Page views: 32" without a stable class/test-id. Inspect only small local elements whose
+    // OWN text explicitly contains the label. This is intentionally not a whole-document
+    // number fallback: the number and the word views must be in the same short element.
+    for(const el of $$('span,p,li,div')){
+      const own=txt(el); if(!own || own.length>90 || !/\b(?:page\s+)?views?\b/i.test(own))continue;
+      const childText=[...el.children].map(txt).filter(Boolean).join(' ');
+      // Avoid broad wrapper elements whose text is mainly inherited from many descendants.
+      if(el.children.length>4 || (childText && own.length>childText.length+50))continue;
+      const n=parseViewsText(own); if(n!=null && n>=0)return {value:n,source:'local-labelled-element:views'};
+    }
+    // Deliberately no document.body numeric fallback. Missing is safer than a fabricated counter.
     return {value:null,source:null};
   };
   const viewRead=readViews();

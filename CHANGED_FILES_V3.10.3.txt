@@ -1,0 +1,17 @@
+COBALT V3.10.3
+
+Modified:
+- web/components/Dashboard.tsx
+- web/lib/opportunities.ts
+- web/scripts/test-opportunities.cjs
+- web/package.json
+- web/package-lock.json
+- extension-v2/manifest.json
+- docs/RELEASE_HISTORY.md
+
+Added:
+- web/scripts/test-queue-filters.cjs
+- CHANGED_FILES_V3.10.3.txt
+
+Schema migrations:
+- none new in V3.10.3

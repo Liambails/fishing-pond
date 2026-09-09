@@ -1,0 +1,14 @@
+COBALT V3.10.2 semantic pagination + scheduler failure isolation
+
+Changed:
+.github/workflows/observe.yml
+worker/search_watches.py
+worker/test_search_watches.py
+web/package.json
+web/package-lock.json
+extension-v2/manifest.json
+docs/README.md
+docs/RELEASE_HISTORY.md
+CHANGED_FILES_V3.10.2.txt
+
+Schema changes: none beyond V3.10.1. Search Watches still require migrations 020 and 021; Opportunity scanner service-role access requires migration 019.
