@@ -206,6 +206,10 @@ function baseSignal(listing:Listing){
   const startingPrice=latest?.starting_price_nzd==null?null:Number(latest.starting_price_nzd);
   const independentObs=independentViewObservations(obs);
   const viewObs=obs.filter((o:any)=>o?.views!=null&&Number.isFinite(Number(o.views)));
+  const watcherObs=obs.filter((o:any)=>o?.watchers!=null&&Number.isFinite(Number(o.watchers)));
+  const bidObs=obs.filter((o:any)=>o?.bids!=null&&Number.isFinite(Number(o.bids)));
+  const lastWatcherChange=watcherObs.length>=2?Math.max(0,Number(watcherObs.at(-1)!.watchers)-Number(watcherObs.at(-2)!.watchers)):null;
+  const lastBidChange=bidObs.length>=2?Math.max(0,Number(bidObs.at(-1)!.bids)-Number(bidObs.at(-2)!.bids)):null;
   const lastViewChange=viewObs.length>=2?Number(viewObs[viewObs.length-1].views)-Number(viewObs[viewObs.length-2].views):null;
   const lastViewChangeHours=viewObs.length>=2?Math.max(0,(Date.parse(String(viewObs[viewObs.length-1].captured_at))-Date.parse(String(viewObs[viewObs.length-2].captured_at)))/3600000):null;
   const recentInfo=independentObs.length>=2?intervalVelocityInfo(independentObs[independentObs.length-2],independentObs[independentObs.length-1]):null;
@@ -224,7 +228,7 @@ function baseSignal(listing:Listing){
   const views24h=viewsLast24Hours(obs);
   const evidenceDetailsValue=evidenceDetails(listing,obs);
   const qas=qaSummary(latest);
-  return {obs,latest,views,watchers,bids,currentBid,startingPrice,velocity,priorVelocity,overallVelocity,price,priceCapturedAt,priceIsLatest,observationCount,independentObservationCount,lastViewChange:lastViewChange!=null&&lastViewChange>=0?lastViewChange:null,lastViewChangeHours,velocityIntervalHours:recentInfo?.hours??null,velocityTrust:recentInfo?.trust??null,rawRecentVelocity:recentInfo?.rawVelocity??null,evidence,engagement,close,views24h,evidenceDetails:evidenceDetailsValue,qas,soldDetected:Boolean(latest?.sold_detected)};
+  return {obs,latest,views,watchers,bids,lastWatcherChange,lastBidChange,currentBid,startingPrice,velocity,priorVelocity,overallVelocity,price,priceCapturedAt,priceIsLatest,observationCount,independentObservationCount,lastViewChange:lastViewChange!=null&&lastViewChange>=0?lastViewChange:null,lastViewChangeHours,velocityIntervalHours:recentInfo?.hours??null,velocityTrust:recentInfo?.trust??null,rawRecentVelocity:recentInfo?.rawVelocity??null,evidence,engagement,close,views24h,evidenceDetails:evidenceDetailsValue,qas,soldDetected:Boolean(latest?.sold_detected)};
 }
 
 export function computeListingSignals(listings:Listing[]){
@@ -289,25 +293,30 @@ export function computeListingSignals(listings:Listing[]){
 
     const statusPlain=label==='GOOD'?'Repeated marketplace attention is now strong enough to investigate':label==='WATCHING'?'Interest is developing, but COBALT is not ready to recommend sourcing it yet':label==='LOW SIGNAL'?'We have enough checks to see that attention is currently weak':label==='TOO EARLY'?'COBALT needs more checks before judging this listing':'Exceptional marketplace attention with repeated support from similar listings';
     const whyParts:string[]=[];
-    if((b.lastViewChange??0)>0) whyParts.push(`+${b.lastViewChange} view${b.lastViewChange===1?'':'s'} since the last check`);
-    if(b.views24h!=null&&b.views24h!==0) whyParts.push(`${b.views24h>0?'+':''}${b.views24h} view${Math.abs(b.views24h)===1?'':'s'} in the last 24 hours`);
-    if(corroborated) whyParts.push(`${peerPositive} of ${peerGroup.length} similar listings are also gaining views`);
-    else if(relativeRatio!=null&&relativeRatio>=1.4) whyParts.push(`it is attracting attention faster than most similar listings`);
-    if((b.bids||0)>0) whyParts.push(`${b.bids} bid${b.bids===1?'':'s'} recorded`);
-    else if((b.watchers||0)>0) whyParts.push(`${b.watchers} watcher${b.watchers===1?'':'s'} recorded`);
-    if((b.qas?.purchase||0)>0) whyParts.push(`${b.qas.purchase} public question${b.qas.purchase===1?'':'s'} suggesting purchase intent`);
-    if(b.soldDetected) whyParts.push('the marketplace page indicates the item sold');
-    if(label==='TOO EARLY'&&!whyParts.length) whyParts.push(`only ${b.independentObservationCount} reliable check${b.independentObservationCount===1?'':'s'} so far`);
-    if(label==='WATCHING'&&!whyParts.length&&b.velocity!=null) whyParts.push('views are still arriving, but the pattern is not strong enough yet');
+    // Explain the strongest evidence that actually exists. Buyer behaviour outranks another
+    // repetitive view sentence; null counters are described as unavailable, never as zero.
+    if(b.soldDetected) whyParts.push('Trade Me indicates this listing sold');
+    if((b.lastBidChange??0)>0) whyParts.push(`bidding increased by ${b.lastBidChange} to ${b.bids} bid${b.bids===1?'':'s'}`);
+    else if((b.bids??0)>0) whyParts.push(`${b.bids} bid${b.bids===1?'':'s'} show direct buyer activity`);
+    if((b.lastWatcherChange??0)>0) whyParts.push(`${b.lastWatcherChange} new watchlist${b.lastWatcherChange===1?'':'s'} since the prior readable count (${b.watchers} total)`);
+    else if((b.watchers??0)>0) whyParts.push(`${b.watchers} people have watchlisted it`);
+    if((b.qas?.purchase||0)>0) whyParts.push(`${b.qas.purchase} public question${b.qas.purchase===1?'':'s'} suggest purchase intent`);
+    else if((b.qas?.compatibility||0)>0) whyParts.push(`${b.qas.compatibility} buyer question${b.qas.compatibility===1?' checks':'s check'} compatibility`);
+    if(corroborated) whyParts.push(`${peerPositive} of ${peerGroup.length} similar listings are also gaining attention`);
+    else if(relativeRatio!=null&&relativeRatio>=1.4) whyParts.push('attention is rising faster than most similar listings');
+    if((b.lastViewChange??0)>0 && whyParts.length<3) whyParts.push(`+${b.lastViewChange} view${b.lastViewChange===1?'':'s'} since the last check`);
+    if(b.views24h!=null&&b.views24h!==0&&whyParts.length<3) whyParts.push(`${b.views24h>0?'+':''}${b.views24h} view${Math.abs(b.views24h)===1?'':'s'} in the last 24 hours`);
+    if(label==='TOO EARLY'&&whyParts.length<2) whyParts.push(`only ${b.independentObservationCount} reliable check${b.independentObservationCount===1?'':'s'} so far`);
+    if(label==='WATCHING'&&!whyParts.length&&b.velocity!=null) whyParts.push('attention is still arriving, but the pattern is not strong enough yet');
     if(label==='LOW SIGNAL'&&!whyParts.length) whyParts.push('recent checks are not showing much new attention');
-    if(Number(b.listing.consecutive_failures||0)>0) whyParts.push(`collection has failed ${b.listing.consecutive_failures} time${b.listing.consecutive_failures===1?'':'s'} recently`);
+    if(Number(b.listing.consecutive_failures||0)>0&&whyParts.length<4) whyParts.push(`collection has failed ${b.listing.consecutive_failures} time${b.listing.consecutive_failures===1?'':'s'} recently`);
     const plainReason=`${statusPlain}${whyParts.length?`: ${whyParts.slice(0,4).join('; ')}`:''}.`;
     const e=b.evidenceDetails;
     const confidenceReason=`COBALT has ${e.independentCount} reliable check${e.independentCount===1?'':'s'} across about ${Math.max(1,Math.round(e.spanHours))} hours${e.failures?`, with ${e.failures} recent collection failure${e.failures===1?'':'s'}`:''}.`;
 
     return {
       score:round(attention),confidence:round(confidence),label,
-      price:b.price,priceCapturedAt:b.priceCapturedAt,priceIsLatest:b.priceIsLatest,views:b.views,views24h:b.views24h,watchers:b.watchers,bids:b.bids,currentBid:b.currentBid,startingPrice:b.startingPrice,
+      price:b.price,priceCapturedAt:b.priceCapturedAt,priceIsLatest:b.priceIsLatest,views:b.views,views24h:b.views24h,watchers:b.watchers,bids:b.bids,watcherChange:b.lastWatcherChange,bidChange:b.lastBidChange,currentBid:b.currentBid,startingPrice:b.startingPrice,
       velocity:b.velocity,overallVelocity:b.overallVelocity,previousVelocity:b.priorVelocity,
       accelerationScore:aScore,closeScore,hoursToClose:b.close?.hoursToClose??null,closeDate:b.close?.closeDate??null,
       relativeVelocity:relativeRatio==null?null:round(relativeRatio,2),peerMedianVelocity:peerMedian==null?null:round(peerMedian,2),peerCount:peerGroup.length,peerPositive,peerPositiveShare:round(peerPositiveShare,2),corroborated,

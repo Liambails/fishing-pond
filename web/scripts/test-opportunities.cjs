@@ -12,9 +12,9 @@ function qualifyStandalone(s){
  const sourceNow=independent>=4&&span>=24&&interval>=10&&demandScore>=62&&(views24>=14||velocity>=12)&&(sold||bids>=2||purchaseQs>=2||views24>=18||velocity>=15);
  return {qualifies:true,sourcingStage:sourceNow?'SOURCE_NOW':strong?'STRONG_LEAD':'EARLY_LEAD',demandScore,sparseEarly};
 }
-function qualifyFamily({positive,mature,span,medianPace,total24,max24,demand,bids=0,purchaseQs=0,sold=0,medianAge=span,medianIndependent=0}){
+function qualifyFamily({positive,mature,span,medianPace,total24,max24,demand,watchers=0,bids=0,purchaseQs=0,sold=0,medianAge=span,medianIndependent=0}){
  if(positive<2||span<6||medianAge<6||(medianPace<1.25&&total24<4))return null;
- let stage='EARLY_LEAD'; const buyerSignals=bids+purchaseQs+sold;
+ let stage='EARLY_LEAD'; const buyerSignals=(watchers>=2?1:0)+bids+purchaseQs+sold;
  const matureTwo=positive>=2&&mature>=2&&span>=12&&medianAge>=10&&demand>=45&&(medianPace>=2.25||total24>=8);
  const sparseButStrong=positive>=2&&medianIndependent>=2&&span>=14&&medianAge>=12&&demand>=50&&(medianPace>=4||total24>=12);
  const broadFamily=positive>=3&&mature>=2&&span>=10&&medianAge>=8&&demand>=43&&(medianPace>=2||total24>=9);
@@ -22,7 +22,8 @@ function qualifyFamily({positive,mature,span,medianPace,total24,max24,demand,bid
  if(matureTwo||sparseButStrong||broadFamily||buyerBacked)stage='STRONG_LEAD';
  const deepFamily=positive>=3&&mature>=3&&span>=20&&medianAge>=16&&demand>=68&&(medianPace>=4||total24>=18)&&(buyerSignals>0||max24>=8);
  const exceptionalPair=positive>=2&&mature>=2&&span>=24&&medianAge>=20&&demand>=76&&total24>=22&&max24>=10;
- if(deepFamily||exceptionalPair)stage='SOURCE_NOW';
+ const broadViewFamily=positive>=5&&mature>=4&&medianIndependent>=4&&span>=36&&medianAge>=30&&demand>=52&&total24>=24&&max24>=6&&medianPace>=1.5;
+ if(deepFamily||exceptionalPair||broadViewFamily)stage='SOURCE_NOW';
  return stage;
 }
 
@@ -48,6 +49,17 @@ assert.equal(qualifyFamily({positive:3,mature:3,span:22,medianAge:18,medianIndep
 assert.equal(qualifyFamily({positive:2,mature:2,span:28,medianAge:24,medianIndependent:4,medianPace:5,total24:24,max24:12,demand:78}),'SOURCE_NOW','an exceptional two-listing family can source now after a full day of mature evidence');
 assert.equal(qualifyFamily({positive:5,mature:5,span:72,medianAge:60,medianIndependent:6,medianPace:.8,total24:3,max24:1,demand:35}),null,'large datasets with weak recent movement must not create opportunities');
 
+// V3.10.3 real-data calibration from the 2026-09-09 export: broad families can be decisive
+// even when Trade Me exposes views but no watcher/bid fields. These figures mirror the
+// observed Vitz tail-light and Colorado window-switch families without using buyer metadata.
+assert.equal(qualifyFamily({positive:7,mature:7,span:61,medianAge:54,medianIndependent:6,medianPace:2.25,total24:40,max24:8,demand:53}),'SOURCE_NOW','seven mature Vitz tail-light listings gaining ~40 views/day should become SOURCE NOW');
+assert.equal(qualifyFamily({positive:9,mature:8,span:61,medianAge:52,medianIndependent:6,medianPace:2.25,total24:54,max24:12,demand:53}),'SOURCE_NOW','a broad mature Colorado window-switch family should become SOURCE NOW without watcher fields');
+assert.equal(qualifyFamily({positive:5,mature:4,span:40,medianAge:32,medianIndependent:4,medianPace:1.6,total24:23,max24:6,demand:52}),'STRONG_LEAD','broad view-only SOURCE NOW still requires at least 24 recent family views');
+assert.equal(qualifyFamily({positive:5,mature:4,span:40,medianAge:32,medianIndependent:4,medianPace:1.6,total24:24,max24:5,demand:52}),'STRONG_LEAD','broad view-only SOURCE NOW still requires one clearly moving listing');
+
 // Concrete V3.9.22 regression: the Vitz left/right tail-light pattern that motivated calibration.
 assert.equal(qualifyFamily({positive:2,mature:2,span:40,medianAge:40,medianIndependent:5,medianPace:9.8,total24:22,max24:12,demand:56}),'STRONG_LEAD','Vitz left/right tail-light pair must trigger supplier research');
-console.log('V3.9.22 opportunity calibration tests passed (standalone + family, sparse + mature + large-data cases).');
+assert.equal(qualifyFamily({positive:2,mature:1,span:12,medianAge:10,medianIndependent:2.5,medianPace:1.7,total24:7,max24:4,demand:51,watchers:4}),'STRONG_LEAD','public watchlist evidence can strengthen a modest corroborated family');
+assert.equal(qualifyFamily({positive:2,mature:1,span:12,medianAge:10,medianIndependent:2.5,medianPace:1.7,total24:7,max24:4,demand:51,sold:1}),'STRONG_LEAD','a confirmed sale can strengthen an already corroborated family but does not create demand by itself');
+assert.equal(qualifyFamily({positive:1,mature:1,span:48,medianAge:40,medianIndependent:5,medianPace:3,total24:8,max24:8,demand:80,sold:1}),null,'one sold listing alone is not enough to create a family opportunity');
+console.log('V3.10.5 opportunity calibration tests passed (standalone + family + broad view-only families + sparse + mature cases).');

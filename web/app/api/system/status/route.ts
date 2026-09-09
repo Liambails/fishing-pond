@@ -5,7 +5,8 @@ export const dynamic='force-dynamic';
 const TABLES=[
  'ai_analyses','collection_errors','collection_runs','daily_briefs','listings',
  'observations','own_listings','price_recommendations','product_listings',
- 'products','scheduler_runs','supplier_quotes','suppliers','system_events'
+ 'products','scheduler_runs','supplier_quotes','suppliers','system_events',
+ 'search_watches','search_watch_runs','listing_acquisition_events'
 ];
 
 function parseDetails(v:any){

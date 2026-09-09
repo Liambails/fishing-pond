@@ -86,6 +86,17 @@ assert.equal(intentRich.questionCount, 5);
 assert.notEqual(intentRich.label, 'MUST_HAVE', 'buyer intent must not bypass repeated evidence requirements');
 
 console.log('marketplace-intent regression tests passed');
+// V3.10.4: Why prioritises real buyer behaviour and reports counter changes.
+const buyerMovement = computeListingSignal(listing([
+  { captured_at: at(24), views: 10, watchers: 2, bids: 0, question_count: 0 },
+  { captured_at: at(12), views: 14, watchers: 3, bids: 1, question_count: 0 },
+  { captured_at: at(0), views: 18, watchers: 6, bids: 3, question_count: 1, purchase_intent_questions: 1 },
+]));
+assert.equal(buyerMovement.watcherChange, 3);
+assert.equal(buyerMovement.bidChange, 2);
+assert.match(buyerMovement.reason, /bidding increased by 2/i);
+assert.match(buyerMovement.reason, /new watchlist/i);
+
 
 // V3.9.17: GOOD is never available with only three independent observations,
 // even when attention/buyer intent or peer context is strong.
