@@ -1,0 +1,11 @@
+COBALT V3.10.12 FINAL PRE-SCALE RELEASE
+
+- V3.10.10 observer-safe view correction retained.
+- V3.10.11 precision-first Opportunity family hardening retained.
+- Production PIN gate retained (COBALT_ACCESS_PIN=5623 via environment).
+- Every newly tracked listing gets a 30-minute follow-up snapshot.
+- Cadence expands/contracts from observed activity after that initial burst.
+- Close-aware caps: <=3h 30m, <=6h 1h, <=12h 2h, <=24h 4h.
+- A scheduled post-close confirmation is never allowed to be later than the normal next check.
+- Short snapshots do not count as independent demand windows until >=3h spacing, preventing noisy inflation.
+- Trade Me browser detail visits remain conservatively removed from view-delta demand evidence.

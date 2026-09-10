@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 from supabase import create_client
 import os, re
 from close_date import normalize_close_date, closure_timing_evidence
-from cadence import activity_snapshot as _activity_snapshot, adaptive_cadence_hours
+from cadence import activity_snapshot as _activity_snapshot, adaptive_cadence_hours, close_aware_interval_hours
 
 
 def client():
@@ -67,19 +67,11 @@ def _recent_observations(db, listing_uuid, limit=12, episode=None):
 
 
 def _recent_acquisition_events(db, listing_uuid, limit=100):
-    return (
-        db.table('listing_acquisition_events')
-        .select('occurred_at,operation,source,status')
-        .eq('listing_uuid',listing_uuid)
-        .eq('operation','listing_detail')
-        .eq('status','success')
-        .eq('source','playwright')
-        .order('occurred_at',desc=True)
-        .limit(limit)
-        .execute()
-        .data
-        or []
-    )
+    try:
+        return (db.table('listing_acquisition_events').select('occurred_at,operation,source,status,diagnostics').eq('listing_uuid',listing_uuid).order('occurred_at',desc=True).limit(limit).execute().data or [])
+    except Exception:
+        return []
+
 
 def _latest_capture_summary(raw):
     raw=dict(raw or {})
@@ -227,13 +219,18 @@ def save_success(listing, raw):
         except Exception as e: print(f'WARNING: lifecycle event write failed: {e}')
     else:
         hours,reason,evidence=adaptive_cadence_hours(listing,history,acquisition_events); own=str((listing.get('metadata') or {}).get('ownership') or '').lower()=='own'; priority=95 if own else (92 if hours<=3 else 88 if hours<=6 else 68 if hours<=12 else 50)
-        next_dt=datetime.now(timezone.utc)+timedelta(hours=hours)
+        now_dt=datetime.now(timezone.utc)
         close_iso=normalize_close_date(raw.get('close_date'), captured)
+        hours,close_reason=close_aware_interval_hours(hours,close_iso,now_dt)
+        if close_reason: reason=f'{reason} · {close_reason}'
+        next_dt=now_dt+timedelta(hours=hours)
         if close_iso:
             try:
                 closure_probe=datetime.fromisoformat(close_iso.replace('Z','+00:00'))+timedelta(minutes=10)
-                if closure_probe>datetime.now(timezone.utc) and closure_probe<next_dt:
-                    next_dt=closure_probe; reason=f'{reason} · closure check shortly after expiry'
+                if closure_probe>now_dt and closure_probe<next_dt:
+                    next_dt=closure_probe
+                    hours=max(0.01,(next_dt-now_dt).total_seconds()/3600)
+                    reason=f'{reason} · closure confirmation 10m after expiry'
             except Exception: pass
         patch.update({'active':True,'lifecycle_state':'active','lifecycle_episode':episode,'relist_check_count':0,'relist_watch_until':None,'last_relisted_at':captured if reopened else listing.get('last_relisted_at'),'relist_match_confidence':1 if reopened else listing.get('relist_match_confidence'),'relist_detection_method':'same_marketplace_id_reopened' if reopened else listing.get('relist_detection_method'),'observation_interval_hours':hours,'priority':priority,'next_observation_at':next_dt.isoformat(),'cadence_reason':'relisted · same marketplace ID · new episode' if reopened else reason,'finalized_at':None,'final_verdict':None,'final_score':None,'final_evidence':{},'closure_reason':None})
         if reopened:

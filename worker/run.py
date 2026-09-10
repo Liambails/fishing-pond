@@ -153,32 +153,14 @@ def main():
      relist_result=detect_relist_from_capture(listing,raw,db,HEADLESS,run['id']); match_result=None
     else:
      search_relist=detect_search_watch_relist(listing,raw,db) if str(listing.get('discovered_via') or '')=='browser_search' else None
-
-     acquisition_occurred_at=raw.get('captured_at') or iso_now()
+     # Log this browser detail visit before cadence/evidence is calculated. Trade Me may count the
+     # visit itself, so downstream view deltas can conservatively subtract possible COBALT views.
      try:
-      db.table('listing_acquisition_events').insert({
-       'listing_uuid':listing['id'],
-       'operation':'listing_detail',
-       'source':'playwright',
-       'status':'success',
-       'occurred_at':acquisition_occurred_at,
-       'duration_ms':int((time.monotonic()-item_started)*1000),
-       'diagnostics':{
-        'views':raw.get('views'),
-        'price':raw.get('buy_now_nzd') or raw.get('asking_price_nzd'),
-        'acquisition_source':acquisition_source,
-        'observer_view_candidate':True
-       }
-      }).execute()
-     except Exception as acquisition_log_e:
-      print(f'WARNING: acquisition telemetry write failed: {acquisition_log_e}')
-
+      event_at=iso_now()
+      db.table('listings').update({'last_acquisition_status':'success','last_acquisition_error_type':None,'last_acquisition_event_at':event_at}).eq('id',listing['id']).execute()
+      db.table('listing_acquisition_events').insert({'listing_uuid':listing['id'],'operation':'listing_detail','source':'playwright','status':'success','occurred_at':event_at,'duration_ms':int((time.monotonic()-item_started)*1000),'diagnostics':{'observer_view_candidate':True,'views':raw.get('views'),'price':raw.get('buy_now_nzd') or raw.get('asking_price_nzd')}}).execute()
+     except Exception as acquisition_log_e: print(f'WARNING: acquisition telemetry write failed: {acquisition_log_e}')
      save_success(listing,raw); match_result=run_matcher_for_listing(listing['id'])
-
-     if str(listing.get('discovered_via') or '')=='browser_search':
-      try:
-       db.table('listings').update({'last_acquisition_status':'success','last_acquisition_error_type':None,'last_acquisition_event_at':acquisition_occurred_at}).eq('id',listing['id']).execute()
-      except Exception as acquisition_log_e: print(f'WARNING: acquisition status write failed: {acquisition_log_e}')
      if search_relist: relist_result=search_relist
      # Persist the closure first, then inspect explicit/semantic successor candidates.
      if effective_ended(raw):

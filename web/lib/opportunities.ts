@@ -4,9 +4,9 @@ import {buildIdf,genericListingSimilarity,isTrustedComparable,listingDocument} f
 
 const STOP=new Set('for with and the a an to of in on from fits fit compatible replacement genuine oem new used part parts car vehicle right left front rear set pair single power master electric electrical'.split(' '));
 const MAKES=['toyota','holden','isuzu','mitsubishi','suzuki','honda','ford','mazda','nissan','subaru','hyundai','kia','bmw','mercedes','audi','volkswagen','vw','jeep','lexus','tesla'];
-const MODELS=['vitz','yaris','aqua','prius','corolla','camry','rav4','rav 4','hiace','landcruiser','land cruiser','swift','outlander','colorado','dmax','d-max','jazz','fit'];
+const MODELS=['vitz','yaris','aqua','prius','corolla','camry','rav4','rav 4','hiace','landcruiser','land cruiser','swift','outlander','colorado','dmax','d-max','jazz','fit','note'];
 const PRODUCT_PATTERNS:[RegExp,string][]=[
- [/master\s+(?:power\s+)?window\s+switch/i,'Master power window switch'],
+ [/master\s+(?:power\s+)?window\s+switch|(?:power\s+)?window\s+master\s+switch/i,'Master power window switch'],
  [/(?:power\s+)?window\s+switch/i,'Power window switch'],
  [/combination\s+switch/i,'Combination switch'],
  [/ignition\s+coil/i,'Ignition coil'],
@@ -14,6 +14,7 @@ const PRODUCT_PATTERNS:[RegExp,string][]=[
  [/wheel\s+speed\s+sensor|abs\s+sensor/i,'ABS wheel speed sensor'],
  [/head\s*light|headlamp/i,'Headlight'],[/tail\s*light|taillight/i,'Tail light'],
  [/door\s+mirror|wing\s+mirror|side\s+mirror/i,'Door mirror'],[/mirror\s+adjust/i,'Mirror adjuster'],
+ [/quarter\s+glass/i,'Quarter glass'],[/fuel\s+(?:door|flap)/i,'Fuel door'],[/tailgate\s+handle|boot\s+handle/i,'Tailgate handle'],[/indicator\s+switch|turn\s+signal\s+switch/i,'Indicator switch'],
  [/door\s+handle/i,'Door handle'],[/wiper\s+switch/i,'Wiper switch'],[/radiator\s+cap/i,'Radiator cap'],[/fuel\s+(?:filler\s+)?cap|petrol\s+cap|gas\s+cap/i,'Fuel cap'],[/boot|tailgate/i,'Boot / tailgate part'],
  [/barbie/i,'Barbie doll'],[/doll/i,'Doll'],[/laptop|notebook/i,'Laptop'],[/phone|iphone|galaxy/i,'Phone']
 ];
@@ -28,8 +29,12 @@ function categoryOf(l:any){const latest=latestObs(l)||{};const p=latest?.categor
 function phrasePresent(text:string,phrase:string){const n=` ${norm(text)} `;const p=norm(phrase).split(/\s+/).join('\\s+');return new RegExp(`(?:^|\\s)${p}(?=\\s|$)`,'i').test(n.trim())}
 function modelOf(title:string){return MODELS.find(m=>phrasePresent(title,m))||null}
 function makeOf(title:string){return MAKES.find(m=>phrasePresent(title,m))||null}
-function productTypeOf(title:string){
+function explicitProductTypeOf(title:string){
  for(const [r,name] of PRODUCT_PATTERNS)if(r.test(title))return name;
+ return null;
+}
+function productTypeOf(title:string){
+ const explicit=explicitProductTypeOf(title);if(explicit)return explicit;
  // Category-agnostic fallback: infer the product noun phrase from the part of the title that
  // describes the item itself, before compatibility boilerplate (for/fits/suitable/compatible).
  // This prevents model/reference tails such as "KZN130 KZN185W TURBO" becoming the product name.
@@ -63,7 +68,7 @@ function dedupeEvidenceRows(rows:any[]){
    const repSeller=sellerOf(rep); if(!seller||!repSeller||seller!==repSeller)return false;
    if(title&&title===norm(rep?.title||''))return true;
    const sim=genericListingSimilarity(rep,row,idf);
-   return isTrustedComparable(sim);
+   return identityCompatible(rep,row)&&isTrustedComparable(sim);
   });
   if(!duplicate)reps.push(row);
  }
@@ -101,11 +106,21 @@ function pairSimilarity(a:any,b:any){
 function identityCompatible(a:any,b:any){
  const A=deriveOpportunityIdentity(a),B=deriveOpportunityIdentity(b);
  if(A.domain!==B.domain)return false;
- if(A.product_type&&B.product_type&&norm(A.product_type)!==norm(B.product_type))return false;
- if(A.make&&B.make&&A.make!==B.make)return false;
- if(A.model&&B.model&&A.model!==B.model)return false;
+
+ // A recognised component mismatch is a hard commercial split. Generic/fallback noun phrases
+ // are deliberately not used as an absolute gate because Search Terms will span many categories.
+ const explicitA=explicitProductTypeOf(String(a?.title||''));
+ const explicitB=explicitProductTypeOf(String(b?.title||''));
+ if(explicitA&&explicitB&&norm(explicitA)!==norm(explicitB))return false;
+
  const sharedPart=A.part_numbers.some((x:string)=>B.part_numbers.includes(x));
  const sharedChassis=A.chassis_codes.some((x:string)=>B.chassis_codes.includes(x));
+
+ // Different makes/models are separate sourcing families unless explicit identity evidence proves
+ // the SKU/fitment is shared. This keeps same-component-but-wrong-fitment rows out of evidence.
+ if(A.make&&B.make&&A.make!==B.make&&!sharedPart)return false;
+ if(A.model&&B.model&&A.model!==B.model&&!sharedPart&&!sharedChassis)return false;
+
  // Conflicting explicit part numbers are a hard split unless fitment evidence agrees.
  if(A.part_numbers.length&&B.part_numbers.length&&!sharedPart&&!sharedChassis)return false;
  return true;
@@ -121,7 +136,7 @@ function unionClusters(rows:any[]){
    const rep=g[0];const sim=genericListingSimilarity(rep,row,idf);
    // The marketplace-neutral comparable gate owns family admission. Domain-specific identity
    // parsing may still enrich the family label, but cannot broaden a contaminated cohort.
-   if(isTrustedComparable(sim)&&sim.score>bestScore){best=g;bestScore=sim.score}
+   if(identityCompatible(rep,row)&&isTrustedComparable(sim)&&sim.score>bestScore){best=g;bestScore=sim.score}
   }
   if(best)best.push(row);else groups.push([row]);
  }
@@ -196,40 +211,11 @@ export async function scanOpportunities(db:any){
  // avoids both PostgREST row caps and very large query URLs as COBALT grows beyond a few hundred listings.
  const allObs=await fetchPaged(()=>db.from('observations').select('*').order('captured_at',{ascending:false}).order('id',{ascending:false}),1000,100000);
  const wanted=new Set((listings||[]).map((x:any)=>String(x.id))); const obs=(allObs||[]).filter((o:any)=>wanted.has(String(o.listing_uuid)));
-
- const allAcquisitionEvents=await fetchPaged(
-  ()=>db.from('listing_acquisition_events')
-   .select('listing_uuid,occurred_at,operation,source,status,diagnostics')
-   .eq('operation','listing_detail')
-   .eq('status','success')
-   .eq('source','playwright')
-   .order('occurred_at',{ascending:false}),
-  1000,
-  100000
- );
- const acquisitionEvents=(allAcquisitionEvents||[]).filter((e:any)=>wanted.has(String(e.listing_uuid)));
-
  const recentCutoff=Date.now()-30*86400000;
  const obsByListing=new Map<string,any[]>();for(const o of obs||[]){const k=String(o.listing_uuid);const a=obsByListing.get(k)||[];if(a.length<80){a.push(o);obsByListing.set(k,a)}}
-
- const acquisitionByListing=new Map<string,any[]>();
- for(const e of acquisitionEvents||[]){
-  const k=String(e.listing_uuid);
-  const a=acquisitionByListing.get(k)||[];
-  if(a.length<200){
-   a.push(e);
-   acquisitionByListing.set(k,a);
-  }
- }
-
- const base=(listings||[])
-  .filter((l:any)=>String(l?.metadata?.observation_queue_status||'active')!=='dismissed')
-  .filter((l:any)=>l.active||Date.parse(l.finalized_at||l.last_observed_at||l.last_seen||'')>=recentCutoff)
-  .map((l:any)=>({
-   ...l,
-   observations:obsByListing.get(String(l.id))||[],
-   acquisition_events:acquisitionByListing.get(String(l.id))||[]
-  }));
+ const allAcquisition=await fetchPaged(()=>db.from('listing_acquisition_events').select('listing_uuid,occurred_at,operation,source,status,diagnostics').eq('status','success').order('occurred_at',{ascending:false}),1000,100000);
+ const acquisitionByListing=new Map<string,any[]>();for(const e of allAcquisition||[]){const k=String(e.listing_uuid);if(!wanted.has(k))continue;const a=acquisitionByListing.get(k)||[];if(a.length<200){a.push(e);acquisitionByListing.set(k,a)}}
+ const base=(listings||[]).filter((l:any)=>String(l?.metadata?.observation_queue_status||'active')!=='dismissed').filter((l:any)=>l.active||Date.parse(l.finalized_at||l.last_observed_at||l.last_seen||'')>=recentCutoff).map((l:any)=>({...l,observations:obsByListing.get(String(l.id))||[],acquisition_events:acquisitionByListing.get(String(l.id))||[]}));
  const signals=computeListingSignals(base);const scored=base.map((l:any,i:number)=>({...l,signal:signals[i]})).filter((l:any)=>Number(l.signal?.independentObservationCount||0)>=2&&(Number(l.signal?.velocity||0)>0||Number(l.signal?.views24h||0)>0));
  const rawClusters=unionClusters(scored); const clusters=rawClusters.filter(g=>g.length>=2); let upserts=0,notifications=0,standaloneUpdated=0; const audit:any[]=[]; const qualifiedKeys=new Set<string>();
  const corroboratedListingIds=new Set<string>();
@@ -295,7 +281,23 @@ export async function scanOpportunities(db:any){
   let opp:any;
   if(!existing){const {data,error:e}=await db.from('opportunities').insert({family_key:key,opportunity_type:'corroborated',title:family.title,category:family.identity.category,product_type:family.identity.product_type,identity:family.identity,identity_confidence:family.identityConfidence,signal_strength:strength,status:'new',metrics,reason,recommendation,first_detected_at:now,last_detected_at:now,last_notified_at:now}).select().single();if(e)throw e;opp=data;upserts++;if(sourcingStage!=='EARLY_LEAD'){const {error:ne}=await db.from('opportunity_notifications').insert({opportunity_id:opp.id,event_type:'detected',title:`${sourcingStage.replaceAll('_',' ')} · ${family.title}`,message:`${livePositive.length} independent comparable source${livePositive.length===1?' is':'s are'} gaining attention across ${livePositiveRaw.length} active marketplace listing${livePositiveRaw.length===1?'':'s'}. COBALT thinks this product is worth supplier research.`,payload:{opportunity_type:'corroborated',strength,sourcing_stage:sourcingStage,metrics},notification_key:`${opp.id}:detected`});if(!ne)notifications++;}}
   else {const material=existing.signal_strength!==strength||String(existing.metrics?.sourcing_stage||'')!==sourcingStage||Number(metrics.positive_listings)>=Number(existing.metrics?.positive_listings||0)+1||Number(metrics.total_views_24h)>=Number(existing.metrics?.total_views_24h||0)+8;const patch:any={opportunity_type:'corroborated',title:family.title,category:family.identity.category,product_type:family.identity.product_type,identity:family.identity,identity_confidence:family.identityConfidence,signal_strength:strength,metrics,reason,recommendation,last_detected_at:now};if(material&&existing.status!=='dismissed')patch.last_notified_at=now;const {data,error:e}=await db.from('opportunities').update(patch).eq('id',existing.id).select().single();if(e)throw e;opp=data;upserts++;if(material&&existing.status!=='dismissed'&&sourcingStage!=='EARLY_LEAD'){const k=`${existing.id}:${strength}:${metrics.positive_listings}:${Math.round(metrics.median_velocity)}`;const {error:ne}=await db.from('opportunity_notifications').insert({opportunity_id:existing.id,event_type:'strengthened',title:`${family.title} signal strengthened`,message:`This lead is now ${sourcingStage.replaceAll('_',' ').toLowerCase()}: ${livePositive.length} independent comparable source${livePositive.length===1?'':'s'} are represented by ${livePositiveRaw.length} active marketplace listing${livePositiveRaw.length===1?'':'s'}, which gained ${totalViews24} views in the last 24 hours.`,payload:{opportunity_type:'corroborated',strength,sourcing_stage:sourcingStage,metrics},notification_key:k});if(!ne)notifications++;}}
-  const existingIds=new Set((await db.from('opportunity_listings').select('listing_uuid').eq('opportunity_id',opp.id)).data?.map((x:any)=>x.listing_uuid)||[]); for(const l of group){const ev={signal:l.signal?.label,velocity:l.signal?.velocity,confidence:l.signal?.confidence,engagement_score:l.signal?.engagementScore,watchers:l.signal?.watchers,bids:l.signal?.bids,question_count:l.signal?.questionCount,purchase_intent_questions:l.signal?.purchaseIntentQuestions,sold_detected:l.signal?.soldDetected,similarity_to_family:1};if(existingIds.has(l.id))await db.from('opportunity_listings').update({evidence:ev,last_seen_at:now}).eq('opportunity_id',opp.id).eq('listing_uuid',l.id);else await db.from('opportunity_listings').insert({opportunity_id:opp.id,listing_uuid:l.id,evidence:ev,last_seen_at:now});}
+  const priorLinks=(await db.from('opportunity_listings').select('listing_uuid').eq('opportunity_id',opp.id)).data||[];
+ const existingIds: Set<string> = new Set<string>(
+  (priorLinks as any[]).map((x: any) => String(x.listing_uuid))
+);
+ const currentIds=new Set(group.map((l:any)=>String(l.id)));
+ const familyRep=group[0];const familyIdf=buildIdf(group.map((r:any)=>listingDocument(r)));
+ for(const l of group){
+  const familySimilarity=genericListingSimilarity(familyRep,l,familyIdf);
+  const ev={signal:l.signal?.label,velocity:l.signal?.velocity,confidence:l.signal?.confidence,engagement_score:l.signal?.engagementScore,watchers:l.signal?.watchers,bids:l.signal?.bids,question_count:l.signal?.questionCount,purchase_intent_questions:l.signal?.purchaseIntentQuestions,sold_detected:l.signal?.soldDetected,similarity_to_family:familySimilarity.score,identity_compatible:identityCompatible(familyRep,l)};
+  if(existingIds.has(String(l.id)))await db.from('opportunity_listings').update({evidence:ev,last_seen_at:now}).eq('opportunity_id',opp.id).eq('listing_uuid',l.id);
+  else await db.from('opportunity_listings').insert({opportunity_id:opp.id,listing_uuid:l.id,evidence:ev,last_seen_at:now});
+ }
+ const staleIds=[...existingIds].filter((id:string)=>!currentIds.has(id));
+ if(staleIds.length){
+  const {error:staleLinkError}=await db.from('opportunity_listings').delete().eq('opportunity_id',opp.id).in('listing_uuid',staleIds);
+  if(staleLinkError)throw staleLinkError;
+ }
   // If one of these listings previously stood alone, the corroborated family now takes precedence.
   // Preserve the standalone history but clear its unread alert so the operator does not see duplicate opportunities.
   for(const l of group){const sk=standaloneKey(l);const {data:priorStandalone}=await db.from('opportunities').select('*').eq('family_key',sk).maybeSingle();if(priorStandalone){const priorMetrics={...(priorStandalone.metrics||{}),superseded_by_family_key:key,superseded_at:now};await db.from('opportunities').update({status:priorStandalone.status==='sourcing'?'sourcing':'watching',metrics:priorMetrics,read_at:now,reason:`This listing is now represented by the corroborated opportunity ${family.title}. The standalone history is retained for provenance.`}).eq('id',priorStandalone.id);await db.from('opportunity_notifications').update({read_at:now}).eq('opportunity_id',priorStandalone.id).is('read_at',null);}}

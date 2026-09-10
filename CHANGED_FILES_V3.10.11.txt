@@ -1,0 +1,21 @@
+COBALT V3.10.11 FINAL PRE-SCALE HARDENING
+
+Core:
+- Hard product-identity gate before Opportunity family admission.
+- Real family-link similarity is stored instead of hard-coded similarity_to_family=1.
+- Stale opportunity_listings are pruned whenever a family is recomputed.
+- Same-seller evidence dedupe cannot collapse incompatible commercial components.
+- Canonical patterns added for quarter glass, fuel door, tailgate handle, indicator switch,
+  and reversed 'window master switch' wording.
+- Nissan Note is recognised as a model for identity parsing.
+- Production regression fixtures cover the exact false-family cases found in DB export 2026-09-10.
+
+Access:
+- Production browser access gate.
+- Four-digit PIN is supplied through COBALT_ACCESS_PIN (do not commit it).
+- Persistent signed browser cookie lasts 180 days.
+- COBALT_ACCESS_SECRET salts the browser token.
+- API routes remain outside the UI middleware so observation/scheduler token workflows are unchanged.
+
+UI lifecycle:
+- V3.10.10 isCurrentOpportunity guard remains authoritative for live sourcing leads.

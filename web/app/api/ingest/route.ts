@@ -56,13 +56,21 @@ function cadence(listing:any,rows:any[]){
   const a=activity(rows),own=String(listing?.metadata?.ownership||'').toLowerCase()==='own';
   const gains=(a.recent_view_gains||[]) as number[];const last=gains.length?gains[gains.length-1]:0;const prior=gains.length>=2?gains[gains.length-2]:0;const two=gains.length>=2;
   const b=Math.max(0,Number(a.bid_delta||0)),w=Math.max(0,Number(a.watcher_delta||0));
-  if(Number(a.independent_count||0)<=1)return {hours:6,reason:'learning · establish a second reliable check',evidence:a};
-  if(Number(a.independent_count||0)===2)return {hours:last>=4?3:6,reason:last>=4?'heating up · strong gain in the latest reliable window':'learning · confirm the early pattern',evidence:a};
-  if((two&&last>=3&&prior>=3)||(last>=5&&b>=1)||b>=2)return {hours:3,reason:'hot · repeated strong gains across reliable checks',evidence:a};
-  if((two&&last+prior>=4&&last>=1&&prior>=1)||last>=3||b>=1||w>=2)return {hours:6,reason:'warm · sustained marketplace attention',evidence:a};
-  if(last>=1||own)return {hours:12,reason:own?'normal · own listing tracking':'normal · some recent movement',evidence:a};
-  if(two&&last===0&&prior===0)return {hours:24,reason:'cold · no new views across two reliable checks',evidence:a};
+  if(Number(a.observation_count||0)<=1)return {hours:.5,reason:'learning burst · first follow-up in 30 minutes',evidence:a};
+  if(Number(a.independent_count||0)<=1)return {hours:3,reason:'learning · establish the first reliable 3h window',evidence:a};
+  if(Number(a.independent_count||0)===2)return {hours:last>=4?2:6,reason:last>=4?'heating up · strong gain in the latest reliable window':'learning · confirm the early pattern',evidence:a};
+  if((two&&last>=3&&prior>=3)||(last>=5&&b>=1)||b>=2)return {hours:2,reason:'hot · repeated strong gains across reliable checks',evidence:a};
+  if((two&&last+prior>=4&&last>=1&&prior>=1)||last>=3||b>=1||w>=2)return {hours:4,reason:'warm · sustained marketplace attention',evidence:a};
+  if(last>=1||own)return {hours:8,reason:own?'normal · own listing tracking':'normal · some recent movement',evidence:a};
+  if(two&&last===0&&prior===0)return {hours:18,reason:'cold · no new views across two reliable checks',evidence:a};
   return {hours:12,reason:'normal · waiting for a clearer pattern',evidence:a};
+}
+function closeAwareHours(baseHours:number,closeIso:string|null){
+  if(!closeIso)return {hours:baseHours,reason:''};
+  const closeMs=Date.parse(closeIso);if(!Number.isFinite(closeMs)||closeMs<=Date.now())return {hours:baseHours,reason:''};
+  const left=(closeMs-Date.now())/3600000;let cap:number|null=null;
+  if(left<=3)cap=.5;else if(left<=6)cap=1;else if(left<=12)cap=2;else if(left<=24)cap=4;
+  return cap!=null&&baseHours>cap?{hours:cap,reason:`closing soon · ${left.toFixed(1)}h left`}:{hours:baseHours,reason:''};
 }
 
 const REQUIRED_CAPTURE_WARNINGS = new Set(['missing_listing_id','missing_title','missing_price','missing_views','missing_seller','missing_description']);
@@ -280,9 +288,9 @@ export async function POST(req: Request) {
   if(isEnded){
     const reason=String(raw.listing_end_reason||(normalizedCloseDate?'expired':'ended')); const f=finalise(history||[],reason);
     const timing=closureTimingEvidence(history||[],capturedAt,Boolean(raw.sold_detected));
-    f.evidence = {
-      ...(f.evidence || {}),
-      closure_timing: timing,
+    f.evidence={
+      ...(f.evidence||{}),
+      closure_timing:timing,
     } as typeof f.evidence & {
       closure_timing: ReturnType<typeof closureTimingEvidence>;
     };
@@ -298,12 +306,12 @@ export async function POST(req: Request) {
     await db.from('listings').update({active:false,lifecycle_state:relistNext?'relist_watch':'terminal_closed',next_observation_at:relistNext,relist_check_count:checkCount,relist_watch_until:watchUntil,last_relist_checked_at:firstTransition?null:capturedAt,finalized_at:existing?.finalized_at||capturedAt,final_verdict:f.verdict,final_score:f.score,final_evidence:f.evidence,closure_reason:reason,cadence_reason:relistNext?(firstTransition?'ended · first relist check in 1h':`ended · relist watch check ${checkCount+1}/${relistDelays.length}`):'ended · relist watch complete',consecutive_failures:0,last_error:null,last_success_source:String(raw.capture_source||'extension-manual')}).eq('id',listing.id);
     if(firstTransition)await db.from('listing_lifecycle_events').insert({listing_uuid:listing.id,listing_family_id:listing.listing_family_id||listing.id,marketplace:listing.marketplace,marketplace_listing_id:listing.listing_id,episode:targetEpisode,event_type:'closed_relist_watch',occurred_at:capturedAt,reason:{closure_reason:reason,next_check:relistNext,effective_end_from_close_date:!Boolean(raw.listing_ended),closure_timing:timing}});
   }else{
-    const c=cadence(listing,history||[]); interval=c.hours; cadenceReason=c.reason;
-    let nextMs=Date.now()+c.hours*3600_000;
-    if(normalizedCloseDate){const closeMs=Date.parse(normalizedCloseDate)+10*60_000;if(Number.isFinite(closeMs)&&closeMs>Date.now()&&closeMs<nextMs){nextMs=closeMs;cadenceReason=`${cadenceReason} · closure check shortly after expiry`;}}
+    const c=cadence(listing,history||[]);const closing=closeAwareHours(c.hours,normalizedCloseDate);interval=closing.hours;cadenceReason=closing.reason?`${c.reason} · ${closing.reason}`:c.reason;
+    let nextMs=Date.now()+interval*3600_000;
+    if(normalizedCloseDate){const closeMs=Date.parse(normalizedCloseDate)+10*60_000;if(Number.isFinite(closeMs)&&closeMs>Date.now()&&closeMs<nextMs){nextMs=closeMs;interval=Math.max(.01,(nextMs-Date.now())/3600000);cadenceReason=`${cadenceReason} · closure confirmation 10m after expiry`;}}
     next=new Date(nextMs).toISOString();
-    const own=String(listing?.metadata?.ownership||'').toLowerCase()==='own'; const priority=own?95:(c.hours<=3?92:c.hours<=6?88:c.hours<=12?68:50);
-    await db.from('listings').update({active:true,lifecycle_state:'active',lifecycle_episode:targetEpisode,next_observation_at:next,observation_interval_hours:c.hours,priority,cadence_reason:reopeningSameId?'relisted · same marketplace ID · new episode':c.reason,consecutive_failures:0,last_error:null,last_success_source:String(raw.capture_source||'extension-manual'),finalized_at:null,final_verdict:null,final_score:null,final_evidence:{},closure_reason:null,relist_check_count:0,relist_watch_until:null,last_relisted_at:reopeningSameId?capturedAt:(existing?.last_relisted_at||null),relist_match_confidence:reopeningSameId?1:(existing?.relist_match_confidence||null),relist_detection_method:reopeningSameId?'same_marketplace_id_reopened':(existing?.relist_detection_method||null)}).eq('id',listing.id);
+    const own=String(listing?.metadata?.ownership||'').toLowerCase()==='own'; const priority=own?95:(interval<=.5?98:interval<=2?95:interval<=3?92:interval<=6?88:interval<=12?68:50);
+    await db.from('listings').update({active:true,lifecycle_state:'active',lifecycle_episode:targetEpisode,next_observation_at:next,observation_interval_hours:interval,priority,cadence_reason:reopeningSameId?'relisted · same marketplace ID · new episode':cadenceReason,consecutive_failures:0,last_error:null,last_success_source:String(raw.capture_source||'extension-manual'),finalized_at:null,final_verdict:null,final_score:null,final_evidence:{},closure_reason:null,relist_check_count:0,relist_watch_until:null,last_relisted_at:reopeningSameId?capturedAt:(existing?.last_relisted_at||null),relist_match_confidence:reopeningSameId?1:(existing?.relist_match_confidence||null),relist_detection_method:reopeningSameId?'same_marketplace_id_reopened':(existing?.relist_detection_method||null)}).eq('id',listing.id);
     if(reopeningSameId)await db.from('listing_lifecycle_events').insert({listing_uuid:listing.id,listing_family_id:existing?.listing_family_id||listing.id,marketplace:listing.marketplace,marketplace_listing_id:listing.listing_id,episode:targetEpisode,event_type:'relisted_same_id',occurred_at:capturedAt,confidence:1,reason:{detected:'same marketplace ID began a new live lifecycle episode',counter_reset_is_new_episode:true,...sameIdRelist.evidence}});
   }
 
