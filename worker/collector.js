@@ -1,7 +1,7 @@
 window.CobaltCollect = async function() {
   // COBALT Trade Me DOM Collector v1.5.8
   // Current manually-opened page only. No crawling, navigation, or remote fetches.
-  const VERSION = "1.5.8";
+  const VERSION = "1.5.9";
   const $ = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => [...r.querySelectorAll(s)];
   const clean = v => String(v ?? "").trim().replace(/\s+/g, " ");
@@ -91,20 +91,51 @@ window.CobaltCollect = async function() {
   let mode=asking!=null?'classified':(placeBid&&buyNow!=null?'auction_buy_now':placeBid?'auction':buyNow!=null?'buy_now':null);
   put('listing_mode',mode,'derived:pricing',.95);
 
-  // Close time: top summary > explicit title attribute > visible tm-closing-time > JSON-LD.
+  // Close time. This value is lifecycle-critical: COBALT uses it to schedule a closure
+  // confirmation and to distinguish normal expiry from early sale/relist behaviour. Trade Me
+  // has several marketplace/motors templates, so use semantic fallbacks rather than one CSS class.
   let close=null, closeSource=null;
-  const topClose=txt($('.tm-motors-date-city-watchlist__date'));
-  if(topClose){close=topClose.replace(/^Closes:\s*/i,'');closeSource='selector:.tm-motors-date-city-watchlist__date';}
-  if(!close){
-    const closeInner=$('tm-listing-close-time tm-closing-time > div, tm-closing-time > div');
-    const title=clean(closeInner?.getAttribute('title'));
-    if(title && title.toLowerCase()!=='undefined'){close=title.replace(/^Closes:\s*/i,'');closeSource='tm-closing-time:title';}
-    else {const visible=txt(closeInner); if(visible){close=visible.replace(/^Closes:\s*/i,'');closeSource='tm-closing-time:text';}}
+  const cleanClose=v=>clean(v).replace(/^(?:(?:auction|listing)\s+)?(?:closed|closing|closes?|ended|ending|ends?)\s*:?\s*/i,'').trim();
+  const looksLikeClose=v=>{
+    const s=clean(v);
+    return Boolean(s && (/(?:today|tomorrow)\s*,?\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?/i.test(s)||/\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b.*\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?/i.test(s)||/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b.*\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/i.test(s)||/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/i.test(s)));
+  };
+  const takeClose=(value,source)=>{if(close||!looksLikeClose(value))return false;close=cleanClose(value);closeSource=source;return true;};
+  const closeSelectors=[
+    '.tm-motors-date-city-watchlist__date',
+    'tm-listing-close-time tm-closing-time',
+    'tm-listing-close-time',
+    'tm-closing-time',
+    '[data-testid*=\"closing\" i]',
+    '[data-testid*=\"close-time\" i]',
+    '[class*=\"listing-close-time\" i]',
+    '[class*=\"closing-time\" i]'
+  ];
+  for(const sel of closeSelectors){
+    if(close)break;
+    for(const el of $$(sel)){
+      const attrs=['title','datetime','aria-label','data-date','data-datetime','data-close-date','data-closing-date'];
+      for(const a of attrs){if(takeClose(el.getAttribute?.(a),`selector:${sel}@${a}`))break;}
+      if(!close)takeClose(txt(el),`selector:${sel}:text`);
+      if(close)break;
+    }
   }
   if(!close && offer?.priceValidUntil){close=offer.priceValidUntil;closeSource='jsonld:priceValidUntil';}
   if(!close && offer?.availabilityEnds){close=offer.availabilityEnds;closeSource='jsonld:availabilityEnds';}
-  put('close_date',close,closeSource,.97);
-  const remaining=txt($('.tm-listing-close-time__remaining'))||null;
+  // Structured application state sometimes carries a close timestamp even when the visible
+  // web component is still hydrating. Only inspect explicit close/end keys, never arbitrary dates.
+  if(!close){
+    const keyRx=/[\"'](?:closeDate|closingDate|closeTime|closingTime|endDate|endTime|expiryDate|expiresAt|endAt)[\"']\s*:\s*[\"']([^\"']+)[\"']/ig;
+    for(const script of $$('script')){let m;const body=script.textContent||'';while((m=keyRx.exec(body))){if(takeClose(m[1],'script:structured-close-key'))break;}if(close)break;}
+  }
+  // Last resort: an explicitly labelled Closes/Closing/Ends fragment in rendered page text.
+  // This cannot accidentally pick up seller-member dates because the label is mandatory.
+  if(!close){
+    const labelled=pageText.match(/(?:Closes?|Closing|Ends?|Ending)\s*:?\s*((?:Today|Tomorrow)\s*,?\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?|(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day)?\s*,?\s*)?\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]{3,9}\s*,?\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
+    if(labelled)takeClose(labelled[1],'page-text:explicit-close-label');
+  }
+  put('close_date',close,closeSource,closeSource?.startsWith('page-text:')?.88:.97);
+  const remaining=txt($('.tm-listing-close-time__remaining, [data-testid*=\"remaining\" i]'))||null;
   put('close_remaining',remaining,remaining?'selector:.tm-listing-close-time__remaining':null,.9);
   const endedPattern=/(?:this listing|this auction|auction)\s+(?:has\s+)?(?:closed|ended)|listing\s+(?:has\s+)?expired|listing\s+(?:has\s+)?(?:been\s+)?withdrawn|listing\s+(?:has\s+)?(?:been\s+)?removed/i;
   const listingEnded=endedPattern.test(pageText);
@@ -411,7 +442,7 @@ window.CobaltCollect = async function() {
   const pricePresent=[buyNow,asking,starting,currentBid].some(v=>v!=null);
   const found=core.filter(k=>record[k]!=null&&record[k]!==''&&(!Array.isArray(record[k])||record[k].length)).length+(pricePresent?1:0);
   const warnings=[];
-  if(!record.listing_id)warnings.push('missing_listing_id'); if(!record.listing_title)warnings.push('missing_title'); if(!pricePresent)warnings.push('missing_price'); if(record.views==null)warnings.push('missing_views'); if(!record.seller)warnings.push('missing_seller'); if(!record.description)warnings.push('missing_description');
+  if(!record.listing_id)warnings.push('missing_listing_id'); if(!record.listing_title)warnings.push('missing_title'); if(!pricePresent)warnings.push('missing_price'); if(record.views==null)warnings.push('missing_views'); if(!record.seller)warnings.push('missing_seller'); if(!record.description)warnings.push('missing_description'); if(record.close_date==null&&!record.listing_ended)warnings.push('missing_close_date');
   record.extraction_quality={core_fields_found:found,core_fields_total:core.length+1,score:Math.round(found/(core.length+1)*100),warnings};
   record._sources=sources;
   console.log('COBALT extracted:',record);

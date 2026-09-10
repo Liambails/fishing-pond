@@ -83,7 +83,11 @@ The collector is the first trust boundary for marketplace counters. Trade Me vie
 ```text
 new marketplace discovery
   -> active user-interest exclusions
-  -> generic TF-IDF/category/identifier similarity
+  -> broad TF-IDF/category candidate retrieval
+  -> generic product-identity confidence
+     -> exact identifier/specification evidence
+     -> contradiction penalties
+     -> strict comparable acceptance
      -> strong negative match: suppression hit only (no recurring observation)
      -> otherwise: canonical listing -> observation queue
 
@@ -94,7 +98,7 @@ Observation Queue row
   -> Delete listing -> destructive record/history removal; creates no preference signal
 ```
 
-The generic similarity layer does not contain vehicle makes/models or category-specific exclusions. Product-domain adapters (for example vehicle fitment) may still exist for richer Product CRM matching, but they sit above the marketplace-neutral queue/admission layer.
+The generic similarity layer does not contain vehicle makes/models or category-specific exclusions. V3.10.7 gives category context only weak weight and explicitly separates broad retrieval from strict comparable acceptance. Product-domain adapters (for example vehicle fitment) may still exist for richer Product CRM matching, but they sit above the marketplace-neutral identity layer. Opportunity aggregation then de-duplicates known relist lineage and exact same-title/same-seller repeats before treating listings as independent corroboration.
 
 ## Scheduler ownership
 

@@ -63,3 +63,31 @@ assert.equal(qualifyFamily({positive:2,mature:1,span:12,medianAge:10,medianIndep
 assert.equal(qualifyFamily({positive:2,mature:1,span:12,medianAge:10,medianIndependent:2.5,medianPace:1.7,total24:7,max24:4,demand:51,sold:1}),'STRONG_LEAD','a confirmed sale can strengthen an already corroborated family but does not create demand by itself');
 assert.equal(qualifyFamily({positive:1,mature:1,span:48,medianAge:40,medianIndependent:5,medianPace:3,total24:8,max24:8,demand:80,sold:1}),null,'one sold listing alone is not enough to create a family opportunity');
 console.log('V3.10.5 opportunity calibration tests passed (standalone + family + broad view-only families + sparse + mature cases).');
+
+// V3.10.7 seller/product evidence-unit regression: multiple marketplace rows from one seller
+// can remain visible for demand, but cannot masquerade as independent commercial corroboration.
+function dedupeSellerProductEvidence(rows){
+ const out=[];
+ for(const row of rows){
+  const dup=out.some(rep=>{
+   if(row.lineage&&rep.lineage===row.lineage)return true;
+   return row.seller&&rep.seller===row.seller&&row.trustedProductKey&&rep.trustedProductKey===row.trustedProductKey;
+  });
+  if(!dup)out.push(row);
+ }
+ return out;
+}
+assert.equal(dedupeSellerProductEvidence([
+ {seller:'nzautomotive',trustedProductKey:'ox730'},
+ {seller:'nzautomotive',trustedProductKey:'ox730'},
+ {seller:'tinkr_nz',trustedProductKey:'ox730'}
+]).length,2,'same seller + same trusted product counts once, different seller remains independent');
+assert.equal(dedupeSellerProductEvidence([
+ {seller:'partsnz',trustedProductKey:'84820-60120'},
+ {seller:'partsnz',trustedProductKey:'84820-60080'}
+]).length,2,'same seller + conflicting product identity remains separate');
+assert.equal(dedupeSellerProductEvidence([
+ {seller:'seller-a',trustedProductKey:'x',lineage:'family-1'},
+ {seller:'seller-b',trustedProductKey:'x',lineage:'family-1'}
+]).length,1,'explicit relist lineage still collapses before seller identity');
+console.log('V3.10.7 seller/product evidence-unit regression tests passed.');

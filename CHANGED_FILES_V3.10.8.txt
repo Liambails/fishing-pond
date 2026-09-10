@@ -1,0 +1,17 @@
+worker/close_date.py
+worker/collector.js
+extension-v2/collector.js
+worker/db.py
+worker/backfill_close_dates.py
+worker/test_close_dates.py
+web/lib/closeDate.ts
+web/app/api/ingest/route.ts
+web/lib/relistMatcher.ts
+web/lib/opportunities.ts
+web/components/Dashboard.tsx
+web/app/globals.css
+web/package.json
+web/package-lock.json
+docs/V3.10.8_CLOSING_DATE_LIFECYCLE.md
+docs/RELEASE_HISTORY.md
+CHANGED_FILES_V3.10.8.txt

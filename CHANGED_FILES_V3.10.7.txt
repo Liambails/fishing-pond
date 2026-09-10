@@ -1,0 +1,23 @@
+COBALT V3.10.7 changed files
+
+web/lib/genericSimilarity.ts
+web/lib/intelligence.ts
+web/lib/opportunities.ts
+web/app/api/observation-queue/similar/route.ts
+web/components/Dashboard.tsx
+web/scripts/test-generic-similarity.cjs
+web/package.json
+web/package-lock.json
+docs/README.md
+docs/ALGORITHMS_AND_FORMULAS.md
+docs/SYSTEM_OVERVIEW.md
+docs/ARCHITECTURE.md
+docs/RELEASE_HISTORY.md
+docs/V3.10.7_PRODUCT_IDENTITY_SIMILARITY.md
+CHANGED_FILES_V3.10.7.txt
+
+UI follow-up: web/components/Dashboard.tsx now defaults sourcing notifications to All and consolidates repeated events per opportunity_id. Documentation updated accordingly.
+
+web/scripts/test-hover-popovers.cjs
+
+Hover interaction follow-up: sourcing notifications, listing evidence, history previews and info tips now share a 500 ms hover-intent delay with near-immediate dismissal on hover-out.

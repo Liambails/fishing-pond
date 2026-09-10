@@ -343,3 +343,6 @@ Generic marketplace captures persist `description`, `category_path`, `primary_im
 6. `trademe_api_unauthorized` usually means credentials/approval are wrong; `trademe_api_rate_limited` means reduce workload or request an appropriate rate limit; `trademe_api_permission_denied` means the application's Approved Purpose does not permit the request. COBALT does not attempt to bypass access controls.
 
 For sandbox testing, create a GitHub Actions repository variable named `TRADEME_API_BASE_URL` with value `https://api.tmsandbox.co.nz` and use sandbox Consumer Key/Secret values. Remove the variable (or leave it unset) for production; COBALT defaults to `https://api.trademe.co.nz`.
+
+## Close dates missing after upgrading to V3.10.8
+Run `python3 worker/backfill_close_dates.py` first as a dry run, then `python3 worker/backfill_close_dates.py --apply`. Follow with `python3 worker/reseed_expired_due.py`. The backfill only fills NULL `observations.close_date` values from existing raw snapshots; it does not overwrite trusted timestamps.

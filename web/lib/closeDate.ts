@@ -53,7 +53,7 @@ export function normalizeMarketplaceCloseDate(value: unknown, now: Date = new Da
   if (value === null || value === undefined) return null;
   let text = String(value).trim();
   if (!text) return null;
-  text = text.replace(/^closes:\s*/i, '').replace(/(\d+)(st|nd|rd|th)\b/gi, '$1').trim();
+  text = text.replace(/^(?:(?:auction|listing)\s+)?(?:closed|closing|closes?|ended|ending|ends?)\s*:?\s*/i, '').replace(/(\d+)(st|nd|rd|th)\b/gi, '$1').trim();
 
   // ISO / RFC / otherwise unambiguous date strings should stay exact.
   if (/\d{4}/.test(text) || /T\d{2}:\d{2}/i.test(text)) {
@@ -71,22 +71,27 @@ export function normalizeMarketplaceCloseDate(value: unknown, now: Date = new Da
     return localNzToUtc(base.year, base.month, base.day, clock.hour, clock.minute).toISOString();
   }
 
-  // Optional weekday, optional explicit year, 12h or 24h clock.
-  const m = text.match(/^(?:(?:mon|tue|wed|thu|fri|sat|sun)(?:day)?\s*,?\s*)?(\d{1,2})\s+([a-z]{3,9})(?:\s+(\d{4}))?\s*,?\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
-  if (!m) return null;
-  const day = Number(m[1]);
-  const month = MONTHS[m[2].toLowerCase()];
-  const clock = parseClock(m[4], m[5], m[6]);
+  // Optional weekday, optional explicit year, 12h or 24h clock. Trade Me has
+  // historically rendered both date-first and time-first variants.
+  let m = text.match(/^(?:(?:mon|tue|wed|thu|fri|sat|sun)(?:day)?\s*,?\s*)?(\d{1,2})\s+([a-z]{3,9})(?:\s+(\d{4}))?\s*,?\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+  let day:number, month:number|undefined, yearText:string|undefined, clock:{hour:number;minute:number}|null;
+  if (m) {
+    day = Number(m[1]); month = MONTHS[m[2].toLowerCase()]; yearText = m[3]; clock = parseClock(m[4], m[5], m[6]);
+  } else {
+    const t = text.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*,?\s*(?:(?:mon|tue|wed|thu|fri|sat|sun)(?:day)?\s*,?\s*)?(\d{1,2})\s+([a-z]{3,9})(?:\s+(\d{4}))?$/i);
+    if (!t) return null;
+    day = Number(t[4]); month = MONTHS[t[5].toLowerCase()]; yearText = t[6]; clock = parseClock(t[1], t[2], t[3]);
+  }
   if (!month || !clock || day < 1 || day > 31) return null;
 
-  let year = m[3] ? Number(m[3]) : nowNz.year;
+  let year = yearText ? Number(yearText) : nowNz.year;
   let candidate = localNzToUtc(year, month, day, clock.hour, clock.minute);
   if (Number.isNaN(candidate.getTime())) return null;
 
   // Marketplace close dates without a year are near-future dates. Around New Year,
   // e.g. a December capture may show "2 Jan"; advance the inferred year if the
   // current-year interpretation is already materially in the past.
-  if (!m[3] && candidate.getTime() < now.getTime() - 48 * 3600_000) {
+  if (!yearText && candidate.getTime() < now.getTime() - 180 * 86400_000) {
     candidate = localNzToUtc(year + 1, month, day, clock.hour, clock.minute);
   }
   return candidate.toISOString();

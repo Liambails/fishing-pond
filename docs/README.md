@@ -2,7 +2,7 @@
 
 This directory is the maintained documentation set for COBALT. There is intentionally no maintained root README; operational and engineering knowledge lives under `/docs`.
 
-Current release: **V3.9.21 — Generic Marketplace Lifecycle + Listing Evidence Inspector**.
+Current release: **V3.10.7 — Generic Product-Identity Similarity**.
 
 ## Start here
 
@@ -47,3 +47,13 @@ Observation Queue lifecycle and relist lineage can now be filtered independently
 
 ### V3.10.4 buyer-signal note
 COBALT treats public buyer counters as optional evidence: a visible `No bids` is 0, but a missing bid/watchlist counter is unknown (`null`). Some Trade Me templates expose `N others watchlisted`; others expose only the Add to Watchlist action. Explicit sale outcomes strengthen Opportunity evidence, but a listing merely ending is never assumed sold. Existing active listings can be refreshed once with `python3 worker/backfill_buyer_signals.py --all`; normal independent-observation timing still applies.
+
+### Hover interaction policy
+
+Dashboard hover popovers use a shared 500 ms hover-intent delay and disappear almost immediately when the pointer leaves. This applies to sourcing notifications, listing evidence previews, history previews and info tips; click-driven modals are unaffected.
+
+### Product-identity similarity (V3.10.7)
+COBALT now separates broad candidate retrieval from strict product comparability. Similar Listings and peer/opportunity corroboration use a category-agnostic product-identity confidence score built from dynamically weighted text, exact distinctive identifiers, generic specification/quantity evidence, left/right pairing, and explicit contradiction penalties. Category overlap is supporting context only. Low-confidence candidates are not allowed to affect pricing or corroborated demand evidence. Relist-lineage and exact same-title/same-seller repeats are also collapsed to one independent evidence unit for Opportunity aggregation.
+
+## V3.10.8 lifecycle note
+Trade Me closing timestamps are normalized and stored as UTC lifecycle evidence. Run `worker/backfill_close_dates.py --apply` once after upgrading, then `worker/reseed_expired_due.py` so recovered historical close dates can immediately drive closure/relist confirmation. See `V3.10.8_CLOSING_DATE_LIFECYCLE.md`.

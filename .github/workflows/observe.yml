@@ -111,13 +111,75 @@ jobs:
             exit 1
           fi
 
-      - name: Install Chromium
+      - name: Cache Playwright Chromium
+        if: steps.dispatch_guard.outputs.duplicate != 'true' && (steps.due.outputs.due == 'true' || steps.search_due.outputs.due == 'true')
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('worker/requirements.txt') }}
+
+      - name: Install Chromium system dependencies
         if: steps.dispatch_guard.outputs.duplicate != 'true' && (steps.due.outputs.due == 'true' || steps.search_due.outputs.due == 'true')
         shell: bash
         run: |
           set -o pipefail
-          if ! python -m playwright install --with-deps chromium 2>&1 | tee -a scheduler_debug.log; then
-            python scheduler_telemetry.py chromium_failed "playwright chromium install failed" || true
+
+          # GitHub's Ubuntu image may carry Google's Chrome APT source. COBALT uses
+          # Playwright Chromium, so that repository is unnecessary and a transient
+          # Google Packages hash mismatch must not prevent an observation cycle.
+          if [ -d /etc/apt/sources.list.d ]; then
+            while IFS= read -r source_file; do
+              echo "Temporarily disabling Chrome APT source: $source_file" | tee -a scheduler_debug.log
+              sudo sed -i 's|^[[:space:]]*deb |# deb |' "$source_file"
+            done < <(grep -rl 'dl.google.com/linux/chrome' /etc/apt/sources.list.d 2>/dev/null || true)
+          fi
+
+          success=false
+          for attempt in 1 2 3; do
+            echo "Chromium dependency attempt $attempt/3" | tee -a scheduler_debug.log
+            sudo rm -rf /var/lib/apt/lists/*
+            sudo apt-get clean
+
+            if python -m playwright install-deps chromium 2>&1 | tee -a scheduler_debug.log; then
+              success=true
+              break
+            fi
+
+            if [ "$attempt" != "3" ]; then
+              delay=$((attempt * 10))
+              echo "Chromium dependency install failed; retrying in ${delay}s" | tee -a scheduler_debug.log
+              sleep "$delay"
+            fi
+          done
+
+          if [ "$success" != "true" ]; then
+            python scheduler_telemetry.py chromium_failed "playwright chromium dependency install failed after 3 attempts" || true
+            exit 1
+          fi
+
+      - name: Install Chromium browser
+        if: steps.dispatch_guard.outputs.duplicate != 'true' && (steps.due.outputs.due == 'true' || steps.search_due.outputs.due == 'true')
+        shell: bash
+        run: |
+          set -o pipefail
+          success=false
+
+          for attempt in 1 2 3; do
+            echo "Chromium browser attempt $attempt/3" | tee -a scheduler_debug.log
+            if python -m playwright install chromium 2>&1 | tee -a scheduler_debug.log; then
+              success=true
+              break
+            fi
+
+            if [ "$attempt" != "3" ]; then
+              delay=$((attempt * 10))
+              echo "Chromium browser install failed; retrying in ${delay}s" | tee -a scheduler_debug.log
+              sleep "$delay"
+            fi
+          done
+
+          if [ "$success" != "true" ]; then
+            python scheduler_telemetry.py chromium_failed "playwright chromium browser install failed after 3 attempts" || true
             exit 1
           fi
 
@@ -160,22 +222,34 @@ jobs:
             exit 0
           fi
           response_file="$(mktemp)"
-          if curl --fail-with-body --silent --show-error \
-            -X POST "$COBALT_WEB_URL/api/opportunities/scan" \
-            -H "x-cobalt-token: $SCAN_TOKEN" \
-            -H "content-type: application/json" \
-            -d '{}' \
-            -o "$response_file"; then
+          scan_ok=false
+          for attempt in 1 2 3; do
+            echo "Opportunity scan attempt $attempt/3" | tee -a scheduler_debug.log
+            if curl --fail-with-body --silent --show-error \
+              --connect-timeout 15 \
+              --max-time 120 \
+              --retry 2 \
+              --retry-all-errors \
+              --retry-delay 5 \
+              -X POST "$COBALT_WEB_URL/api/opportunities/scan" \
+              -H "x-cobalt-token: $SCAN_TOKEN" \
+              -H "content-type: application/json" \
+              -d '{}' \
+              -o "$response_file"; then
+              scan_ok=true
+              break
+            fi
+            if [ "$attempt" != "3" ]; then sleep $((attempt * 10)); fi
+          done
+          if [ "$scan_ok" = "true" ]; then
             echo "Opportunity scan response:" | tee -a scheduler_debug.log
             cat "$response_file" | tee -a scheduler_debug.log
             echo | tee -a scheduler_debug.log
           else
-            echo "Opportunity scan failed:" | tee -a scheduler_debug.log
+            echo "WARNING: Opportunity scan failed after retries. Observation collection already completed, so this scheduler run will remain healthy and the next wake can retry the scan." | tee -a scheduler_debug.log
             cat "$response_file" | tee -a scheduler_debug.log || true
             echo | tee -a scheduler_debug.log
             python scheduler_telemetry.py opportunity_scan_failed "$(cat "$response_file" 2>/dev/null | head -c 1000)" || true
-            rm -f "$response_file"
-            exit 1
           fi
           rm -f "$response_file"
 

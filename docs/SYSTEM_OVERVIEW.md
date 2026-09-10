@@ -5,14 +5,18 @@
 COBALT is Motera's product-opportunity research system. It turns marketplace listings into longitudinal evidence that can answer progressively harder questions:
 
 1. Is a listing receiving meaningful attention?
-2. Which listings are genuinely comparable versions of the same automotive part?
+2. Which listings are genuinely comparable versions of the same underlying product?
 3. What does the comparable market price look like?
 4. Is a product worth sourcing, sampling, test-listing, or rejecting?
 5. How does that evidence change through listing closure and relisting?
 
 COBALT deliberately separates **collection**, **identity**, **market intelligence**, and **sourcing decisions**. A high view count is evidence of attention, not proof of a sale.
 
-Current release: **V3.9.21 — Generic Marketplace Lifecycle + Listing Evidence Inspector**.
+Current release: **V3.10.7 — Generic Product-Identity Similarity**.
+
+## Dashboard hover interaction policy
+
+Hover-driven dashboard overlays deliberately require **500 ms of sustained hover intent** before opening and dismiss in approximately **50 ms** after the pointer leaves. The policy applies to sourcing-opportunity notifications, Observation Queue listing-evidence inspectors, price/view/bid history popovers, and inline info tips. Click-driven full-screen/modal actions are unchanged. This prevents incidental popovers from appearing while the operator is scrolling through dense tables while keeping deliberate inspection fast.
 
 ## End-to-end architecture
 
@@ -145,7 +149,7 @@ A manual `Not comparable` decision is durable and prevents the automatic matcher
 
 ## Comparable Market Engine
 
-Product CRM matching uses deterministic structured/domain evidence plus fuzzy text evidence. Queue peer/suppression and relist matching use category-agnostic similarity primitives; Product CRM still has domain adapters where structured identity is available.
+Product CRM matching uses deterministic structured/domain evidence plus fuzzy text evidence. Queue peer/suppression and Opportunity-family admission use the V3.10.7 category-agnostic product-identity confidence layer: broad retrieval stays permissive, while only high-confidence comparables may affect corroboration or pricing. Product CRM may still add domain adapters where richer structured identity is available. Opportunity corroboration additionally collapses known relist lineage and exact same-title/same-seller duplicates into one independent evidence unit so repeated inventory does not inflate demand or pricing breadth.
 
 The matcher first derives structured automotive identity:
 
@@ -284,3 +288,6 @@ COBALT treats automotive identity as optional enrichment rather than a requireme
 
 ### V3.9.22 sourcing recommendation calibration
 The Opportunity engine uses recent marketplace movement, independent observation windows, observed listing age, corroborating live listings, historical support and any available buyer-intent evidence. It is intentionally asymmetric: corroborated families require fewer observations than standalone listings, while short-duration bursts are blocked. Trade Me fields such as bids/questions/watchers strengthen a lead but missing fields do not prevent a high-confidence view-based recommendation.
+
+## Closing-date lifecycle signal (V3.10.8)
+The collector captures the advertised Trade Me close time on every observation where available. The worker normalizes it to UTC, schedules a post-expiry confirmation, and keeps ended listings on sparse relist watch. A confirmed sale before the previously advertised deadline is recorded as `final_evidence.closure_timing.sold_early`; a same-seller successor is recorded under `final_evidence.relist`. Early closure without explicit sold evidence is not treated as demand.

@@ -261,6 +261,44 @@ otherwise     -> REJECT
 
 Manual reject/accept overrides are durable and take precedence over later automatic reconciliation.
 
+## 5A. Generic product-identity similarity (V3.10.7)
+
+Queue similarity, interest suppression, peer corroboration and Opportunity family admission use a marketplace/category-agnostic product-identity layer. The engine deliberately separates **candidate retrieval** from **comparable acceptance**.
+
+Candidate retrieval is broad and combines TF-IDF cosine, IDF-weighted token overlap and weak category context. It exists only to find plausible candidates. Its score must never be used directly for market pricing.
+
+Comparable confidence is precision-first:
+
+```text
+candidate retrieval =
+    0.66 * TF-IDF cosine
+  + 0.24 * IDF-weighted token overlap
+  + 0.10 * category context
+
+comparable confidence =
+    0.72 * TF-IDF cosine
+  + 0.23 * IDF-weighted token overlap
+  + 0.05 * category context
+
++ strong boost for exact distinctive identifiers
++ neutral treatment of complementary left/right counterparts
+- identifier-family conflicts
+- specification / quantity conflicts
+- front/rear, inner/outer, interior/exterior, upper/lower and single-vs-pair/set conflicts
+```
+
+Distinctive identifiers are detected generically rather than through an automotive taxonomy. Examples include `OX730`, `52-183`, `84820-60080`, `NHP10`, `WH-1000XM6`, and `DHP486`. Segmented numeric codes are also supported. Exact identifier overlap is strong identity evidence. Conflicting codes from the same identifier family are explicit negative evidence; for example `OX730` vs `OX492`, `52-183` vs `52-169`, and `84820-60080` vs `84820-60120`.
+
+Generic specifications are parsed independently from identifiers. A `4 button` vs `2 button` difference is therefore treated as a configuration conflict rather than being hidden by an otherwise templated title. The same mechanism applies to capacities, dimensions, voltage, counts and other unit-bearing specifications. Missing information is not treated as a contradiction.
+
+Left/right is treated as a complementary paired variant when the rest of the product identity agrees. This preserves strong pricing evidence for paired counterparts such as left/right exterior handles, lights and sensors without hard-coding vehicle models. By contrast, front/rear and inner/outer differences remain explicit positional conflicts.
+
+Marketplace boilerplate such as `suitable for`, `seller`, `shipping`, and `new` is excluded from core text evidence. Category similarity is intentionally weak: same-category products are not assumed comparable.
+
+Only matches passing `isTrustedComparable(...)` may contribute to peer corroboration, Opportunity-family evidence or Similar Listings shown as usable comparables. The gate rejects any identifier/specification contradiction, otherwise accepts comparable confidence >=0.82, or >=0.76 when an exact distinctive identifier is shared. This follows the precision-first rule: a smaller set of high-confidence comparables is preferable to a large contaminated set.
+
+Corroborated Opportunity evidence is also de-duplicated by known relist lineage. When lineage is unavailable, exact same-title listings from the same seller share one evidence unit for demand/buyer-count aggregation and family pricing. This prevents a relist or repeated seller inventory from masquerading as independent market corroboration while preserving every raw observation row.
+
 ## 6. Similarity-weighted market pricing
 
 Only accepted comparable listings enter product pricing.
@@ -342,7 +380,7 @@ Views are deliberately **not** identity proof because counters can reset between
 - Close timing can contextualize observed attention but must not create demand by itself.
 - Repeated relists by one seller must not inflate independent seller count.
 - Product pricing must use accepted comparables only.
-- Structured automotive identity outranks fuzzy text and price similarity.
+- Product-identity contradictions outrank fuzzy text/category similarity; domain-specific structured evidence may add stricter rules where available.
 
 ## Cross-listing opportunity detection (V3.9.12)
 
@@ -528,3 +566,6 @@ Live listings remain the source for current 24-hour movement and live observed p
 A counter drop alone never opens a new lifecycle episode. For a same marketplace ID, COBALT compares the latest observation in the current episode with the new capture. A new episode is accepted when the previous advertised close has elapsed and the new capture is live with a substantially later future close, or when an ended/relist-watch row returns with a future close. A substantial view reset can corroborate the transition. The old episode remains finalized; the reset counter becomes the baseline of the new episode, so e.g. `44 -> 3` across a relist is never treated as `-41` demand.
 
 Generic marketplace attributes are captured as label/value facts and are not coerced into automotive identity. Known labels such as Views, Condition, Location, Watchers, Bids and Closes may backfill their normalized fields only when the primary extractor left that field missing.
+
+## Lifecycle conversion evidence (V3.10.8)
+`close_date` is the advertised marketplace deadline, normalized from NZ-local Trade Me text. For a closure captured at `t_close`, COBALT searches earlier observations for the most recent advertised deadline `t_advertised > t_close + 5 minutes`. `sold_early = true` only when Trade Me also exposes explicit sold evidence. Same-seller relists are weaker continuity evidence because relisting can be automatic and is not equivalent to a sale.

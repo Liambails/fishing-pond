@@ -16,6 +16,14 @@ export type Obs = {
   lifecycle_episode?:number|null;
 };
 
+export type AcquisitionEvent = {
+  occurred_at?:string|null;
+  operation?:string|null;
+  source?:string|null;
+  status?:string|null;
+  diagnostics?:any;
+};
+
 export type Listing = {
   id:string;
   listing_id:string;
@@ -31,6 +39,7 @@ export type Listing = {
   last_error?:string|null;
   metadata?:any;
   observations?:Obs[];
+  acquisition_events?:AcquisitionEvent[];
   lifecycle_episode?:number|null;
   lifecycle_state?:string|null;
 };
@@ -65,6 +74,54 @@ export function priceOf(o:Obs){ return o.buy_now_nzd ?? o.asking_price_nzd ?? o.
 function chronological(obs:Obs[]=[]){
   return [...obs].filter(x=>x.captured_at).sort((a,b)=>Date.parse(a.captured_at!)-Date.parse(b.captured_at!));
 }
+
+function observerEvents(events:AcquisitionEvent[]=[]){
+  return [...events].filter((e:any)=>
+    Boolean(e?.occurred_at)
+    && String(e?.operation||'')==='listing_detail'
+    && String(e?.status||'')==='success'
+    && String(e?.source||'').toLowerCase()==='playwright'
+    // Only use events produced by the new complete instrumentation.
+    // Older acquisition telemetry was partial, so it must not be
+    // retroactively treated as a complete self-view history.
+    && e?.diagnostics?.observer_view_candidate===true
+  );
+}
+
+function observerVisitsBetween(events:AcquisitionEvent[]=[],start?:string|null,end?:string|null){
+  if(!start||!end)return 0;
+  const startMs=Date.parse(start);
+  const endMs=Date.parse(end);
+  if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<=startMs)return 0;
+
+  return observerEvents(events).filter((e:any)=>{
+    const t=Date.parse(String(e.occurred_at||''));
+    return Number.isFinite(t)&&t>startMs&&t<=endMs;
+  }).length;
+}
+
+function correctedViewDelta(a?:Obs,b?:Obs,events:AcquisitionEvent[]=[]){
+  if(!a?.captured_at||!b?.captured_at||a.views==null||b.views==null)return null;
+
+  const raw=Number(b.views)-Number(a.views);
+
+  // Counter reset/parser anomaly is not negative demand.
+  if(!Number.isFinite(raw)||raw<0)return null;
+
+  const rawDelta=Math.max(0,raw);
+  const possibleObserverViews=observerVisitsBetween(
+    events,
+    a.captured_at,
+    b.captured_at
+  );
+
+  const correctedDelta=Math.max(
+    0,
+    rawDelta-Math.min(rawDelta,possibleObserverViews)
+  );
+
+  return {rawDelta,possibleObserverViews,correctedDelta};
+}
 function independentViewObservations(obs:Obs[]=[]){
   const a=chronological(obs).filter(x=>x.views!=null);
   if(a.length<=1)return a;
@@ -84,45 +141,82 @@ function independentViewObservations(obs:Obs[]=[]){
   return selected.reverse();
 }
 
-function intervalVelocityInfo(a?:Obs,b?:Obs){
+function intervalVelocityInfo(a?:Obs,b?:Obs,events:AcquisitionEvent[]=[]){
   if(!a?.captured_at||!b?.captured_at||a.views==null||b.views==null)return null;
+
   const hours=(Date.parse(b.captured_at)-Date.parse(a.captured_at))/HOUR;
   if(hours<=0)return null;
-  const delta=Number(b.views)-Number(a.views);
-  // Marketplace view counters are cumulative. A negative delta is a parser/reset anomaly, not negative demand.
-  if(delta<0)return null;
+
+  const deltaInfo=correctedViewDelta(a,b,events);
+  if(!deltaInfo)return null;
+
+  const delta=deltaInfo.correctedDelta;
   const rawVelocity=delta/(hours/24);
+  const marketplaceRawVelocity=deltaInfo.rawDelta/(hours/24);
+
   // 3-12h windows are useful, but should not be treated like a full-day trend.
   // Trust rises smoothly from 35% at 3h to 100% at 12h.
-  const trust=hours>=FULL_VELOCITY_TRUST_HOURS?1:clamp(.35+.65*((hours-MIN_INDEPENDENT_GAP_HOURS)/(FULL_VELOCITY_TRUST_HOURS-MIN_INDEPENDENT_GAP_HOURS)),.35,1);
-  return {velocity:round(rawVelocity*trust,2),rawVelocity:round(rawVelocity,2),hours:round(hours,2),trust:round(trust,2),delta};
+  const trust=hours>=FULL_VELOCITY_TRUST_HOURS
+    ?1
+    :clamp(
+      .35+.65*((hours-MIN_INDEPENDENT_GAP_HOURS)/
+      (FULL_VELOCITY_TRUST_HOURS-MIN_INDEPENDENT_GAP_HOURS)),
+      .35,
+      1
+    );
+
+  return {
+    velocity:round(rawVelocity*trust,2),
+    rawVelocity:round(rawVelocity,2),
+    marketplaceRawVelocity:round(marketplaceRawVelocity,2),
+    hours:round(hours,2),
+    trust:round(trust,2),
+    delta,
+    rawViewDelta:deltaInfo.rawDelta,
+    possibleObserverViews:deltaInfo.possibleObserverViews
+  };
 }
-function intervalVelocity(a?:Obs,b?:Obs){ return intervalVelocityInfo(a,b)?.velocity ?? null; }
-export function listingVelocity(obs:Obs[]=[]){
+function intervalVelocity(a?:Obs,b?:Obs,events:AcquisitionEvent[]=[]){ return intervalVelocityInfo(a,b,events)?.velocity ?? null; }
+export function listingVelocity(obs:Obs[]=[],events:AcquisitionEvent[]=[]){
   const a=independentViewObservations(obs);
   if(a.length<2)return null;
-  return intervalVelocity(a[0],a[a.length-1]);
+  return intervalVelocity(a[0],a[a.length-1],events);
 }
-export function recentVelocity(obs:Obs[]=[]){
+export function recentVelocity(obs:Obs[]=[],events:AcquisitionEvent[]=[]){
   const a=independentViewObservations(obs);
   if(a.length<2)return null;
-  return intervalVelocity(a[a.length-2],a[a.length-1]);
+  return intervalVelocity(a[a.length-2],a[a.length-1],events);
 }
-export function previousVelocity(obs:Obs[]=[]){
+export function previousVelocity(obs:Obs[]=[],events:AcquisitionEvent[]=[]){
   const a=independentViewObservations(obs);
   if(a.length<3)return null;
-  return intervalVelocity(a[a.length-3],a[a.length-2]);
+  return intervalVelocity(a[a.length-3],a[a.length-2],events);
 }
 
-function viewsLast24Hours(obs:Obs[]=[]){
+function viewsLast24Hours(obs:Obs[]=[],events:AcquisitionEvent[]=[]){
   const a=chronological(obs).filter(x=>x.views!=null);
   if(a.length<2)return null;
-  const latest=a[a.length-1]; const lt=Date.parse(latest.captured_at!); const cutoff=lt-DAY;
-  const candidates=a.slice(0,-1).filter(x=>Date.parse(x.captured_at!)<=cutoff+4*3600000);
+
+  const latest=a[a.length-1];
+  const lt=Date.parse(latest.captured_at!);
+  const cutoff=lt-DAY;
+
+  const candidates=a
+    .slice(0,-1)
+    .filter(x=>Date.parse(x.captured_at!)<=cutoff+4*3600000);
+
   if(!candidates.length)return null;
-  const base=candidates.reduce((best,x)=>Math.abs(Date.parse(x.captured_at!)-cutoff)<Math.abs(Date.parse(best.captured_at!)-cutoff)?x:best,candidates[0]);
-  const delta=Number(latest.views)-Number(base.views);
-  return delta<0?null:delta;
+
+  const base=candidates.reduce(
+    (best,x)=>
+      Math.abs(Date.parse(x.captured_at!)-cutoff)
+      <Math.abs(Date.parse(best.captured_at!)-cutoff)
+        ?x
+        :best,
+    candidates[0]
+  );
+
+  return correctedViewDelta(base,latest,events)?.correctedDelta ?? null;
 }
 
 function evidenceDetails(listing:Listing,obs:Obs[]){
@@ -210,12 +304,16 @@ function baseSignal(listing:Listing){
   const bidObs=obs.filter((o:any)=>o?.bids!=null&&Number.isFinite(Number(o.bids)));
   const lastWatcherChange=watcherObs.length>=2?Math.max(0,Number(watcherObs.at(-1)!.watchers)-Number(watcherObs.at(-2)!.watchers)):null;
   const lastBidChange=bidObs.length>=2?Math.max(0,Number(bidObs.at(-1)!.bids)-Number(bidObs.at(-2)!.bids)):null;
-  const lastViewChange=viewObs.length>=2?Number(viewObs[viewObs.length-1].views)-Number(viewObs[viewObs.length-2].views):null;
+  const acquisitionEvents=listing.acquisition_events||[];
+  const lastViewDeltaInfo=viewObs.length>=2
+    ?correctedViewDelta(viewObs[viewObs.length-2],viewObs[viewObs.length-1],acquisitionEvents)
+    :null;
+  const lastViewChange=lastViewDeltaInfo?.correctedDelta??null;
   const lastViewChangeHours=viewObs.length>=2?Math.max(0,(Date.parse(String(viewObs[viewObs.length-1].captured_at))-Date.parse(String(viewObs[viewObs.length-2].captured_at)))/3600000):null;
-  const recentInfo=independentObs.length>=2?intervalVelocityInfo(independentObs[independentObs.length-2],independentObs[independentObs.length-1]):null;
+  const recentInfo=independentObs.length>=2?intervalVelocityInfo(independentObs[independentObs.length-2],independentObs[independentObs.length-1],acquisitionEvents):null;
   const velocity=recentInfo?.velocity??null;
-  const priorVelocity=independentObs.length>=3?intervalVelocity(independentObs[independentObs.length-3],independentObs[independentObs.length-2]):null;
-  const overallVelocity=listingVelocity(obs);
+  const priorVelocity=independentObs.length>=3?intervalVelocity(independentObs[independentObs.length-3],independentObs[independentObs.length-2],acquisitionEvents):null;
+  const overallVelocity=listingVelocity(obs,acquisitionEvents);
   const latestPricedObs=[...obs].reverse().find((o:any)=>priceOf(o)!=null)||null;
   const price=latestPricedObs?priceOf(latestPricedObs):null;
   const priceCapturedAt=latestPricedObs?.captured_at||null;
@@ -225,10 +323,14 @@ function baseSignal(listing:Listing){
   const evidence=evidenceScore(listing,obs);
   const engagement=engagementScore(latest);
   const close=validCloseDate(latest);
-  const views24h=viewsLast24Hours(obs);
+  const views24h=viewsLast24Hours(obs,acquisitionEvents);
   const evidenceDetailsValue=evidenceDetails(listing,obs);
   const qas=qaSummary(latest);
-  return {obs,latest,views,watchers,bids,lastWatcherChange,lastBidChange,currentBid,startingPrice,velocity,priorVelocity,overallVelocity,price,priceCapturedAt,priceIsLatest,observationCount,independentObservationCount,lastViewChange:lastViewChange!=null&&lastViewChange>=0?lastViewChange:null,lastViewChangeHours,velocityIntervalHours:recentInfo?.hours??null,velocityTrust:recentInfo?.trust??null,rawRecentVelocity:recentInfo?.rawVelocity??null,evidence,engagement,close,views24h,evidenceDetails:evidenceDetailsValue,qas,soldDetected:Boolean(latest?.sold_detected)};
+  return {obs,latest,views,watchers,bids,lastWatcherChange,lastBidChange,currentBid,startingPrice,velocity,priorVelocity,overallVelocity,price,priceCapturedAt,priceIsLatest,observationCount,independentObservationCount,lastViewChange:lastViewChange!=null&&lastViewChange>=0?lastViewChange:null,lastViewChangeHours,velocityIntervalHours:recentInfo?.hours??null,velocityTrust:recentInfo?.trust??null,rawRecentVelocity:recentInfo?.rawVelocity??null,
+    marketplaceRawRecentVelocity:recentInfo?.marketplaceRawVelocity??null,
+    rawLastViewChange:lastViewDeltaInfo?.rawDelta??null,
+    possibleObserverViewsLastInterval:lastViewDeltaInfo?.possibleObserverViews??0,
+    evidence,engagement,close,views24h,evidenceDetails:evidenceDetailsValue,qas,soldDetected:Boolean(latest?.sold_detected)};
 }
 
 export function computeListingSignals(listings:Listing[]){
@@ -320,7 +422,12 @@ export function computeListingSignals(listings:Listing[]){
       velocity:b.velocity,overallVelocity:b.overallVelocity,previousVelocity:b.priorVelocity,
       accelerationScore:aScore,closeScore,hoursToClose:b.close?.hoursToClose??null,closeDate:b.close?.closeDate??null,
       relativeVelocity:relativeRatio==null?null:round(relativeRatio,2),peerMedianVelocity:peerMedian==null?null:round(peerMedian,2),peerCount:peerGroup.length,peerPositive,peerPositiveShare:round(peerPositiveShare,2),corroborated,
-      observationCount:b.observationCount,independentObservationCount:b.independentObservationCount,compressedObservationCount:b.evidenceDetails.compressedCount,lastViewChange:b.lastViewChange,lastViewChangeHours:b.lastViewChangeHours,velocityIntervalHours:b.velocityIntervalHours,velocityTrust:b.velocityTrust,rawRecentVelocity:b.rawRecentVelocity,evidenceScore:round(b.evidence),engagementScore:b.engagement==null?null:round(b.engagement),questionCount:b.qas?.total||0,purchaseIntentQuestions:b.qas?.purchase||0,compatibilityQuestions:b.qas?.compatibility||0,conditionQuestions:b.qas?.condition||0,qaIdentityCodes:b.qas?.identityCodes||[],soldDetected:b.soldDetected,
+      observationCount:b.observationCount,independentObservationCount:b.independentObservationCount,compressedObservationCount:b.evidenceDetails.compressedCount,lastViewChange:b.lastViewChange,lastViewChangeHours:b.lastViewChangeHours,velocityIntervalHours:b.velocityIntervalHours,velocityTrust:b.velocityTrust,
+      rawRecentVelocity:b.rawRecentVelocity,
+      marketplaceRawRecentVelocity:b.marketplaceRawRecentVelocity,
+      rawLastViewChange:b.rawLastViewChange,
+      possibleObserverViewsLastInterval:b.possibleObserverViewsLastInterval,
+      evidenceScore:round(b.evidence),engagementScore:b.engagement==null?null:round(b.engagement),questionCount:b.qas?.total||0,purchaseIntentQuestions:b.qas?.purchase||0,compatibilityQuestions:b.qas?.compatibility||0,conditionQuestions:b.qas?.condition||0,qaIdentityCodes:b.qas?.identityCodes||[],soldDetected:b.soldDetected,
       reason:plainReason,confidenceReason,
       components:Object.fromEntries(usable.map(([name,,score])=>[name,round(score)]))
     };

@@ -111,6 +111,20 @@ function authorized(req:Request){
   return Boolean(expected&&got===expected);
 }
 
+function closureTimingEvidence(rows:any[],capturedAt:string,soldDetected:boolean){
+  const closed=Date.parse(capturedAt); let scheduled:number|null=null;
+  if(!Number.isFinite(closed))return {scheduled_close_date:null,observed_closed_at:capturedAt,closed_before_scheduled_close:false,sold_early:false,minutes_early:0,early_close_is_demand_signal:false};
+  const ordered=[...(rows||[])].sort((a,b)=>Date.parse(b.captured_at||'')-Date.parse(a.captured_at||''));
+  for(const row of ordered){
+    const seen=Date.parse(row?.captured_at||''),close=Date.parse(row?.close_date||'');
+    if(!Number.isFinite(seen)||!Number.isFinite(close)||seen>=closed-1000)continue;
+    if(close>closed+5*60_000){scheduled=close;break;}
+  }
+  const early=scheduled!=null&&closed<scheduled-5*60_000;
+  const minutesEarly=early&&scheduled!=null?Math.round(((scheduled-closed)/60000)*10)/10:0;
+  return {scheduled_close_date:scheduled!=null?new Date(scheduled).toISOString():null,observed_closed_at:new Date(closed).toISOString(),closed_before_scheduled_close:early,sold_early:Boolean(early&&soldDetected),minutes_early:minutesEarly,early_close_is_demand_signal:Boolean(early&&soldDetected)};
+}
+
 function finalise(rows:any[],reason:string){
   const a=activity(rows),r=String(reason||'ended').toLowerCase(); let verdict='WEAK_EVIDENCE';
   if(r.includes('withdraw')||r.includes('remove'))verdict='WITHDRAWN_REMOVED';
@@ -174,7 +188,7 @@ export async function POST(req: Request) {
   const sameIdRelist=sameIdRelistEvidence(existing,raw,previousLifecycleObservation);
   const reopeningSameId=Boolean(existing&&!isEnded&&sameIdRelist.detected);
   const targetEpisode=Number(existing?.lifecycle_episode||1)+(reopeningSameId?1:0);
-  const normalizedCloseDate=normalizeMarketplaceCloseDate(raw.close_date);
+  const normalizedCloseDate=normalizeMarketplaceCloseDate(raw.close_date,new Date(capturedAt));
   const quality=captureQuality({...raw,listing_id:identity.listingId});
   let previouslyComplete=metadataCaptureComplete(existing?.metadata);
   if(existing&&!previouslyComplete){
@@ -260,11 +274,20 @@ export async function POST(req: Request) {
     const {error:obsErr}=await db.from('observations').upsert(observation,{onConflict:'listing_uuid,captured_at'});
     if(obsErr)return json({ok:false,error:obsErr.message},{status:500});
   }
-  const {data:history}=await db.from('observations').select('captured_at,views,watchers,bids,lifecycle_episode').eq('listing_uuid',listing.id).eq('lifecycle_episode',targetEpisode).order('captured_at',{ascending:false}).limit(12);
+  const {data:history}=await db.from('observations').select('captured_at,views,watchers,bids,close_date,sold_detected,lifecycle_episode').eq('listing_uuid',listing.id).eq('lifecycle_episode',targetEpisode).order('captured_at',{ascending:false}).limit(12);
 
   let next:string|null=null; let interval:number|null=null; let cadenceReason='listing finalized'; let finalVerdict:string|null=null;
   if(isEnded){
-    const reason=String(raw.listing_end_reason||(normalizedCloseDate?'expired':'ended')); const f=finalise(history||[],reason); finalVerdict=f.verdict;
+    const reason=String(raw.listing_end_reason||(normalizedCloseDate?'expired':'ended')); const f=finalise(history||[],reason);
+    const timing=closureTimingEvidence(history||[],capturedAt,Boolean(raw.sold_detected));
+    f.evidence = {
+      ...(f.evidence || {}),
+      closure_timing: timing,
+    } as typeof f.evidence & {
+      closure_timing: ReturnType<typeof closureTimingEvidence>;
+    };
+    if(timing.sold_early){f.verdict='STRONG_EVIDENCE';f.score=Math.min(100,Math.max(Number(f.score||0),78)+12);}
+    finalVerdict=f.verdict;
     const firstTransition=!wasClosedState;
     const checkCount=firstTransition?0:Number(existing?.relist_check_count||0)+1;
     const relistDelays=[1,6,18,48,96];
@@ -273,7 +296,7 @@ export async function POST(req: Request) {
     const watchExpired=Date.parse(watchUntil)<=Date.now();
     const relistNext=watchExpired||checkCount>=relistDelays.length?null:new Date(Date.now()+delayHours*3600_000).toISOString();
     await db.from('listings').update({active:false,lifecycle_state:relistNext?'relist_watch':'terminal_closed',next_observation_at:relistNext,relist_check_count:checkCount,relist_watch_until:watchUntil,last_relist_checked_at:firstTransition?null:capturedAt,finalized_at:existing?.finalized_at||capturedAt,final_verdict:f.verdict,final_score:f.score,final_evidence:f.evidence,closure_reason:reason,cadence_reason:relistNext?(firstTransition?'ended · first relist check in 1h':`ended · relist watch check ${checkCount+1}/${relistDelays.length}`):'ended · relist watch complete',consecutive_failures:0,last_error:null,last_success_source:String(raw.capture_source||'extension-manual')}).eq('id',listing.id);
-    if(firstTransition)await db.from('listing_lifecycle_events').insert({listing_uuid:listing.id,listing_family_id:listing.listing_family_id||listing.id,marketplace:listing.marketplace,marketplace_listing_id:listing.listing_id,episode:targetEpisode,event_type:'closed_relist_watch',occurred_at:capturedAt,reason:{closure_reason:reason,next_check:relistNext,effective_end_from_close_date:!Boolean(raw.listing_ended)}});
+    if(firstTransition)await db.from('listing_lifecycle_events').insert({listing_uuid:listing.id,listing_family_id:listing.listing_family_id||listing.id,marketplace:listing.marketplace,marketplace_listing_id:listing.listing_id,episode:targetEpisode,event_type:'closed_relist_watch',occurred_at:capturedAt,reason:{closure_reason:reason,next_check:relistNext,effective_end_from_close_date:!Boolean(raw.listing_ended),closure_timing:timing}});
   }else{
     const c=cadence(listing,history||[]); interval=c.hours; cadenceReason=c.reason;
     let nextMs=Date.now()+c.hours*3600_000;

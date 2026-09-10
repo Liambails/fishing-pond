@@ -1,3 +1,12 @@
+# V3.10.8 — Closing-date lifecycle reliability
+
+- Fixed Trade Me close-date normalization that discarded valid strings containing spaces before `am/pm` and closed-page prefixes.
+- Added resilient category-agnostic close-time extraction across Trade Me templates.
+- Added one-time close-date backfill and expired-listing reseed tooling.
+- Closing dates now support reliable closure probes, same-ID relist detection, explicit early-sale evidence, and same-seller relist lifecycle evidence.
+- Opportunity Intelligence treats confirmed early sales as strong lifecycle evidence and same-seller relists as weaker continuity evidence.
+- Observation Queue surfaces `Sold early` and `Relisted by same seller` lifecycle evidence.
+
 ## V3.10.5 — Search Terms isolation and conversion evidence
 - Separate noindex Search Terms page at `/search-watches`.
 - Confirmed sales now corroborate product families after listings end; a sale is supporting conversion evidence, not an automatic SOURCE_NOW trigger.
@@ -82,6 +91,27 @@
 - Collector version 1.5.5. No database migration required.
 
 # COBALT — release history
+
+## V3.10.7 — Generic Product-Identity Similarity
+- Standardised hover-driven popovers across the dashboard: 500 ms hover intent before opening and near-immediate dismissal on pointer exit. This covers sourcing notifications, observation listing evidence, price/view/bid history and info tips, reducing accidental overlays while scrolling.
+- Added seller/product evidence units so one seller cannot create false independent corroboration by publishing the same trusted product under multiple titles; raw listing-level demand remains intact.
+- Hardened GitHub observation bootstrap and made opportunity-scan transport failures retryable/non-fatal after collection succeeds.
+- Sourcing feed defaults to All, removes Priority, and collapses repeated notification events by stable opportunity ID while retaining event history.
+
+- Reframed queue similarity from raw title similarity to product/comparable confidence.
+- Added a separate broad `retrievalScore`; it may discover candidates but is never sufficient for pricing/corroboration.
+- Added IDF-weighted token overlap and expanded generic marketplace-boilerplate suppression.
+- Added category-agnostic distinctive-identifier extraction for mixed alpha/numeric and segmented numeric references.
+- Exact identifier overlap strongly increases confidence; same-family identifier conflicts explicitly reduce confidence.
+- Added generic specification/count conflict detection (for example 4-button vs 2-button variants).
+- Added generic positional contradiction handling. Complementary left/right counterparts may remain strong comparables; front/rear, inner/outer, interior/exterior and upper/lower conflicts are penalized.
+- Category overlap is now weak supporting context rather than product-identity proof.
+- Similar Listings now returns only strict comparable matches rather than displaying a long tail of low-confidence lexical neighbours.
+- Listing peer corroboration and Opportunity-family admission now require the same strict generic comparable gate, preventing low-confidence neighbours from affecting demand or pricing evidence.
+- Opportunity aggregation de-duplicates known relist lineage and exact same-title/same-seller repeats before counting independent corroboration, buyer counters, or family pricing breadth.
+- Added screenshot-derived regressions covering RAV4 paired door handles vs fuel doors, Vitz headlight reference conflicts, Outlander ABS/window-switch separation, Colorado button variants, PARTSNZ template noise, OX730/OX492 identity, and Hiace/Nissan cross-product false positives.
+- No database migration required.
+
 
 ## V3.9.15 — Standalone Opportunity Signals
 

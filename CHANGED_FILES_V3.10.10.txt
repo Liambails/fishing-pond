@@ -1,0 +1,10 @@
+COBALT V3.10.10
+
+Observer-safe marketplace intelligence:
+- Corrects marketplace view deltas using logged COBALT Playwright detail-page visits.
+- Treats corrected view activity as a conservative external-demand lower bound.
+- Adds acquisition-event telemetry to Python cadence/final-verdict calculations.
+- Adds acquisition-event telemetry to TypeScript listing/opportunity intelligence.
+- Prevents legacy or stale opportunities from appearing as live sourcing leads.
+- Preserves manually sourced opportunities even if marketplace qualification later drops.
+- Adds observer-view contamination regression coverage.

@@ -1,0 +1,16 @@
+COBALT V3.10.9 — opportunity/queue alignment final calibration
+
+Changed:
+- web/lib/opportunities.ts
+  - prevents compatibility/model/reference tails from becoming product names
+  - adds explicit radiator/fuel cap noun recognition while retaining a category-agnostic noun-phrase fallback
+  - existing precision-first similarity admission remains unchanged
+- web/components/Dashboard.tsx
+  - Most promising now surfaces listings supporting current opportunities first
+  - ordering boost is presentation-only and does not alter similarity, demand, confidence, or pricing
+- web/package.json / package-lock.json
+  - version 3.10.9
+
+Validation:
+- npm run test:all: PASS
+- npm run build could not be completed in artifact environment because node_modules/Next.js were not present; run locally before deployment.
