@@ -1,0 +1,18 @@
+COBALT V3.10.13 — pre Search-Term scale gate
+
+Updated:
+- web/app/access/page.tsx
+- web/app/access/AccessClient.tsx
+- web/lib/opportunities.ts
+- web/components/Dashboard.tsx
+- web/app/api/ingest/route.ts
+- worker/inspect_listing_cadence.py
+- supabase/migrations/001_initial.sql
+- supabase/migrations/022_observation_interval_precision.sql
+- web/package.json
+
+Purpose:
+- Terminal-style production access gate with explicit checking/success/error/slow states.
+- Hard post-auth navigation so the HttpOnly session cookie is carried into the protected request.
+- Retire stale sourcing recommendations from live Opportunity/notification surfaces without deleting operator sourcing history.
+- Carry forward V3.10.12 validation fixes and fractional close-aligned observation intervals.

@@ -3,7 +3,7 @@ import AccessClient from './AccessClient';
 
 export default function AccessPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<div style={{minHeight:'100vh',background:'#07111d'}} />} >
       <AccessClient />
     </Suspense>
   );

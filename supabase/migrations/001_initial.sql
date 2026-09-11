@@ -31,7 +31,7 @@ create table if not exists public.listings (
   last_seen timestamptz,
   last_observed_at timestamptz,
   next_observation_at timestamptz,
-  observation_interval_hours integer not null default 24 check (observation_interval_hours between 1 and 8760),
+  observation_interval_hours double precision not null default 24 check (observation_interval_hours > 0 and observation_interval_hours <= 8760),
   priority integer not null default 50 check (priority between 0 and 100),
   consecutive_failures integer not null default 0,
   last_error text,

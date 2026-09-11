@@ -1,0 +1,18 @@
+COBALT V3.10.14 — Bulk Search Term Builder
+
+Changed:
+- web/components/SearchWatches.tsx
+  - Single search/add field filters existing terms as the operator types.
+  - Exact existing terms become a silent no-op instead of an error.
+  - Added CSV upload icon and bulk-import modal.
+  - Added downloadable CSV template with required search_term header.
+  - CSV parser supports quoted fields, trims whitespace, ignores blanks, and deduplicates within the file.
+  - Import preview and added/skipped result feedback.
+- web/app/api/search-watches/route.ts
+  - POST accepts either searchTerm or searchTerms[].
+  - Case/whitespace-insensitive application-level duplicate prevention.
+  - Bulk inserts only terms that do not already exist for the same marketplace/category.
+- web/app/globals.css
+  - Search/add composer and bulk-import modal styling.
+- web/package.json / package-lock.json
+  - Version 3.10.14.

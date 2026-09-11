@@ -26,9 +26,7 @@ const sandbox={
   TextEncoder,
   TextDecoder,
   require:(id)=>{
-    if(id.includes('pagedQuery'))return {
-      fetchPaged:async()=>[],
-    };
+    if(id.includes('pagedQuery'))return {fetchPaged:async()=>[]};
     if(id.includes('genericSimilarity'))return {
       listingDocument:(r)=>String(r?.title||''),
       buildIdf:()=>new Map(),

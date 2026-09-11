@@ -283,8 +283,8 @@ export async function scanOpportunities(db:any){
   else {const material=existing.signal_strength!==strength||String(existing.metrics?.sourcing_stage||'')!==sourcingStage||Number(metrics.positive_listings)>=Number(existing.metrics?.positive_listings||0)+1||Number(metrics.total_views_24h)>=Number(existing.metrics?.total_views_24h||0)+8;const patch:any={opportunity_type:'corroborated',title:family.title,category:family.identity.category,product_type:family.identity.product_type,identity:family.identity,identity_confidence:family.identityConfidence,signal_strength:strength,metrics,reason,recommendation,last_detected_at:now};if(material&&existing.status!=='dismissed')patch.last_notified_at=now;const {data,error:e}=await db.from('opportunities').update(patch).eq('id',existing.id).select().single();if(e)throw e;opp=data;upserts++;if(material&&existing.status!=='dismissed'&&sourcingStage!=='EARLY_LEAD'){const k=`${existing.id}:${strength}:${metrics.positive_listings}:${Math.round(metrics.median_velocity)}`;const {error:ne}=await db.from('opportunity_notifications').insert({opportunity_id:existing.id,event_type:'strengthened',title:`${family.title} signal strengthened`,message:`This lead is now ${sourcingStage.replaceAll('_',' ').toLowerCase()}: ${livePositive.length} independent comparable source${livePositive.length===1?'':'s'} are represented by ${livePositiveRaw.length} active marketplace listing${livePositiveRaw.length===1?'':'s'}, which gained ${totalViews24} views in the last 24 hours.`,payload:{opportunity_type:'corroborated',strength,sourcing_stage:sourcingStage,metrics},notification_key:k});if(!ne)notifications++;}}
   const priorLinks=(await db.from('opportunity_listings').select('listing_uuid').eq('opportunity_id',opp.id)).data||[];
  const existingIds: Set<string> = new Set<string>(
-  (priorLinks as any[]).map((x: any) => String(x.listing_uuid))
-);
+  (priorLinks as any[]).map((x:any)=>String(x.listing_uuid))
+ );
  const currentIds=new Set(group.map((l:any)=>String(l.id)));
  const familyRep=group[0];const familyIdf=buildIdf(group.map((r:any)=>listingDocument(r)));
  for(const l of group){
@@ -331,7 +331,16 @@ export async function scanOpportunities(db:any){
  // provenance, but stale/invalid families no longer remain presented as current opportunities.
  const {data:priorOpps}=await db.from('opportunities').select('id,family_key,status,metrics').neq('status','dismissed');
  const expiredAt=new Date().toISOString();
- for(const old of priorOpps||[]){if(qualifiedKeys.has(String(old.family_key)))continue;if(old.status==='sourcing')continue;const oldMetrics={...(old.metrics||{}),currently_qualified:false,qualification_lost_at:expiredAt};await db.from('opportunities').update({status:'watching',read_at:expiredAt,metrics:oldMetrics}).eq('id',old.id);await db.from('opportunity_notifications').update({read_at:expiredAt}).eq('opportunity_id',old.id).is('read_at',null);}
+ for(const old of priorOpps||[]){
+  if(qualifiedKeys.has(String(old.family_key)))continue;
+  const oldMetrics={...(old.metrics||{}),currently_qualified:false,qualification_lost_at:expiredAt};
+  // A manually-started sourcing row is operator history, so preserve its status. However, it must
+  // no longer masquerade as a current SOURCE_NOW recommendation once the family stops qualifying.
+  // This also retires legacy contaminated sourcing families after the identity hardening pass.
+  const nextStatus=old.status==='sourcing'?'sourcing':'watching';
+  await db.from('opportunities').update({status:nextStatus,read_at:expiredAt,metrics:oldMetrics}).eq('id',old.id);
+  await db.from('opportunity_notifications').update({read_at:expiredAt}).eq('opportunity_id',old.id).is('read_at',null);
+ }
  return {ok:true,scoredListings:scored.length,clusters:clusters.length,opportunitiesUpdated:upserts,standaloneOpportunitiesUpdated:standaloneUpdated,notificationsCreated:notifications,audit:audit.sort((a,b)=>Number(b.demand_score||0)-Number(a.demand_score||0)).slice(0,25)};
 }
 

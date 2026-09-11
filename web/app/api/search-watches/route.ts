@@ -1,5 +1,6 @@
 import {NextResponse} from 'next/server';
 import {adminClient} from '../../../lib/supabase';
+import {fetchPaged} from '../../../lib/pagedQuery';
 
 export const dynamic='force-dynamic';
 
@@ -17,12 +18,23 @@ export async function GET(){
 
 export async function POST(req:Request){
  try{
-  const body=await req.json();const searchTerm=String(body?.searchTerm||'').trim();
-  if(searchTerm.length<2)return NextResponse.json({error:'Enter a search term.'},{status:400});
+  const body=await req.json();
+  const incoming=Array.isArray(body?.searchTerms)?body.searchTerms:[body?.searchTerm];
+  const requested:string[]=[];const requestedKeys=new Set<string>();
+  for(const raw of incoming){const t=String(raw||'').trim().replace(/\s+/g,' ');const k=t.toLocaleLowerCase();if(t.length>=2&&!requestedKeys.has(k)){requestedKeys.add(k);requested.push(t)}}
+  if(!requested.length)return NextResponse.json({ok:true,added:0,skipped:0,watches:[]});
+  const marketplace=String(body?.marketplace||'Trade Me');const category=String(body?.category||'').trim()||null;
   const db=adminClient();
-  const row={marketplace:String(body?.marketplace||'Trade Me'),name:String(body?.name||'').trim()||null,search_term:searchTerm,category:String(body?.category||'').trim()||null,interval_hours:Math.max(1,Math.min(168,Number(body?.intervalHours)||6)),max_pages:Math.max(1,Math.min(20,Number(body?.maxPages)||3)),rows_per_page:Math.max(1,Math.min(500,Number(body?.rowsPerPage)||100)),active:true,next_run_at:new Date().toISOString()};
-  const {data,error}=await db.from('search_watches').insert(row).select('*').single();if(error)throw error;
-  return NextResponse.json({ok:true,watch:data});
+  const existing=await fetchPaged(()=>db.from('search_watches').select('id,search_term,marketplace,category').eq('marketplace',marketplace),1000,10000);
+  const existingKeys=new Set(existing.filter((x:any)=>(x.category||null)===category).map((x:any)=>String(x.search_term||'').trim().replace(/\s+/g,' ').toLocaleLowerCase()));
+  const unique=requested.filter(t=>!existingKeys.has(t.toLocaleLowerCase()));
+  if(!unique.length)return NextResponse.json({ok:true,added:0,skipped:requested.length,watches:[]});
+  const now=new Date().toISOString();
+  const common={marketplace,name:null,category,interval_hours:Math.max(1,Math.min(168,Number(body?.intervalHours)||6)),max_pages:Math.max(1,Math.min(20,Number(body?.maxPages)||3)),rows_per_page:Math.max(1,Math.min(500,Number(body?.rowsPerPage)||100)),active:true,next_run_at:now};
+  const rows=unique.map(search_term=>({...common,search_term}));
+  const {data,error}=await db.from('search_watches').insert(rows).select('*');
+  if(error){if((error as any)?.code==='23505')return NextResponse.json({ok:true,added:0,skipped:requested.length,watches:[]});throw error}
+  return NextResponse.json({ok:true,added:(data||[]).length,skipped:requested.length-(data||[]).length,watches:data||[],watch:(data||[])[0]||null});
  }catch(e:any){return NextResponse.json({error:e?.message||'Unable to create Search Watch.'},{status:500});}
 }
 

@@ -281,7 +281,10 @@ export default function Dashboard({products,listings,interventions:initialErrors
  const goodListings=activeListings.filter(x=>x.signal?.label==='GOOD').length;
  const watchingListings=activeListings.filter(x=>x.signal?.label==='WATCHING').length;
  const prospects=mustHaveListings+goodListings+watchingListings;
- const isCurrentOpportunity=(o:any)=>o?.status!=='dismissed'&&(o?.status==='sourcing'||o?.metrics?.currently_qualified===true);
+ const isCurrentOpportunity=(o:any)=>o?.status!=='dismissed'&&(
+  o?.metrics?.currently_qualified===true||
+  (o?.status==='sourcing'&&o?.metrics?.currently_qualified!==false)
+ );
  const activeOpportunityCount=opportunities.filter(isCurrentOpportunity).length;
  const fallbackBrief=`${products.length} product${products.length===1?' is':'s are'} in My Products. ${scoredProducts.length?`${strongProducts} currently look strong and ${watchProducts} need watching.`:'None are being scored yet because your own listings still need enough tracking data.'} The observation queue has ${mustHaveListings+goodListings} strong candidate${mustHaveListings+goodListings===1?'':'s'} and ${watchingListings} watching listing${watchingListings===1?'':'s'}. ${activeOpportunityCount} sourcing lead${activeOpportunityCount===1?' is':'s are'} ready for review.`;
 
