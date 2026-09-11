@@ -16,6 +16,7 @@ from db import client
 load_dotenv()
 MAX_WATCHES = int(os.getenv('MAX_SEARCH_WATCHES_PER_RUN', '4'))
 MAX_NEW_PER_WATCH = int(os.getenv('MAX_NEW_LISTINGS_PER_WATCH_RUN', '250'))
+MAX_LISTING_PRICE_NZD = float(os.getenv('SEARCH_WATCH_MAX_LISTING_PRICE_NZD', '5000'))
 PAGE_SETTLE_MS = int(os.getenv('SEARCH_WATCH_PAGE_SETTLE_MS', '2500'))
 LISTING_RX = re.compile(r'/listing/(\d{6,})\b', re.I)
 CHALLENGES = (
@@ -199,14 +200,111 @@ def classify_page(page, status=None):
     return None, body
 
 
+PRICE_RX = re.compile(r'\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)')
+
+# Strong whole-vehicle URL families. Trade Me parts/accessories live under different
+# paths, so these can be rejected without opening the listing detail page.
+WHOLE_VEHICLE_PATH_MARKERS = (
+    '/a/motors/cars/',
+    '/a/motors/used-cars/',
+)
+
+# If a title clearly names a component, do not classify it as a whole vehicle from
+# title wording alone. The hard price ceiling still applies independently.
+PART_WORDS = re.compile(
+    r'\b(?:'
+    r'headlight|headlamp|tail\s*light|taillight|lamp|bumper|bonnet|hood|guard|fender|'
+    r'door|handle|mirror|window|switch|relay|sensor|coil|injector|alternator|starter|'
+    r'radiator|cap|hose|pump|filter|brake|rotor|disc|pad|caliper|shock|strut|spring|'
+    r'arm|bush|bearing|hub|axle|shaft|cv|joint|rack|steering|wheel|rim|tyre|tire|'
+    r'engine|motor|gearbox|transmission|clutch|flywheel|mount|manifold|throttle|'
+    r'ecu|computer|module|camera|stereo|radio|speaker|seat|trim|panel|spoiler|'
+    r'grille|garnish|indicator|wiper|blade|windscreen|glass|quarter\s+glass|'
+    r'fuel\s+(?:door|flap|cap)|boot|tailgate|hatch|key|remote|fob|badge|emblem|'
+    r'carpet|mat|cover|tray|rack|bar|towbar|tow\s*bar|muffler|exhaust|catalytic|'
+    r'converter|oxygen|o2|map|maf|gasket|seal|belt|chain|pulley|tensioner|'
+    r'compressor|condenser|evaporator|battery|charger|inverter|converter'
+    r')\b',
+    re.I,
+)
+
+VEHICLE_CARD_WORDS = re.compile(
+    r'\b(?:odometer|kilomet(?:re|er)s?|\d[\d,]*\s*km\b|automatic|manual|'
+    r'petrol|diesel|hybrid|electric|hatchback|sedan|saloon|station\s+wagon|'
+    r'suv|utility|ute|4wd|awd|registration|on\s+road\s+costs?|orc|finance)\b',
+    re.I,
+)
+
+YEAR_RX = re.compile(r'\b(?:19[89]\d|20[0-2]\d)\b')
+
+
+def listing_prices(text: str | None):
+    values = []
+    for raw in PRICE_RX.findall(str(text or '')):
+        try:
+            values.append(float(raw.replace(',', '')))
+        except ValueError:
+            pass
+    return values
+
+
+def whole_vehicle_url(url: str | None):
+    path = (urlparse(str(url or '')).path or '').lower()
+    return any(marker in path for marker in WHOLE_VEHICLE_PATH_MARKERS)
+
+
+def discovery_rejection(item, max_price_nzd: float = MAX_LISTING_PRICE_NZD):
+    """Return a silent rejection reason or None for a search result.
+
+    Search Watch is a product/parts discovery feed. Whole vehicles and very
+    expensive results should never enter the Observation Queue. This gate is
+    deliberately before `upsert_discovery`, so rejected results create no
+    listing row, no observation schedule and no user-facing error.
+    """
+    url = str(item.get('url') or '')
+    title = ' '.join(str(item.get('listing_title') or '').split())
+    card_text = ' '.join(str(item.get('card_text') or '').split())
+    blob = f'{title} {card_text}'.strip()
+
+    if whole_vehicle_url(url):
+        return 'whole_vehicle_url'
+
+    prices = listing_prices(blob)
+    if prices and max(prices) >= max_price_nzd:
+        return 'price_ceiling'
+
+    # Whole-car cards normally expose several vehicle descriptors. Requiring
+    # multiple signals keeps fitment-heavy parts titles from being discarded.
+    if not PART_WORDS.search(title):
+        signals = len(set(m.group(0).lower() for m in VEHICLE_CARD_WORDS.finditer(blob)))
+        if YEAR_RX.search(title) and signals >= 1:
+            return 'whole_vehicle_text'
+        if signals >= 3:
+            return 'whole_vehicle_text'
+
+    return None
+
+
 def extract_results(page):
     anchors = page.locator('a[href*="/listing/"]').evaluate_all(
-        r'''els => els.map(a => ({
-          href:a.href || a.getAttribute('href') || '',
-          text:(a.innerText || a.textContent || '').replace(/\s+/g,' ').trim(),
-          aria:a.getAttribute('aria-label') || '',
-          title:a.getAttribute('title') || ''
-        }))'''
+        r'''els => els.map(a => {
+          let node = a;
+          let cardText = '';
+          for (let depth = 0; node && depth < 7; depth++, node = node.parentElement) {
+            const text = (node.innerText || node.textContent || '').replace(/\s+/g,' ').trim();
+            if (text.length >= 20 && text.length <= 2600) {
+              cardText = text;
+              if (/\$\s*[0-9]/.test(text) || /\b(?:odometer|km|automatic|manual|petrol|diesel|hybrid)\b/i.test(text)) break;
+            }
+          }
+          return {
+            href:a.href || a.getAttribute('href') || '',
+            text:(a.innerText || a.textContent || '').replace(/\s+/g,' ').trim(),
+            aria:a.getAttribute('aria-label') || '',
+            title:a.getAttribute('title') || '',
+            cardText
+          };
+        })'''
     )
     out = {}
     for a in anchors:
@@ -218,13 +316,21 @@ def extract_results(page):
         if not _same_trademe_host(href):
             continue
         title = str(a.get('text') or a.get('aria') or a.get('title') or '').strip()
+        card_text = str(a.get('cardText') or '').strip()
         prev = out.get(lid)
         item = {
             'listing_id': lid,
             'url': href.split('?')[0],
             'listing_title': title[:500] or None,
+            'card_text': card_text[:2600] or None,
         }
-        if prev is None or len(title) > len(str(prev.get('listing_title') or '')):
+        # Prefer the anchor/card combination containing the richest visible data.
+        quality = len(title) + len(card_text)
+        prev_quality = (
+            len(str(prev.get('listing_title') or '')) + len(str(prev.get('card_text') or ''))
+            if prev else -1
+        )
+        if prev is None or quality > prev_quality:
             out[lid] = item
     return list(out.values())
 
@@ -234,6 +340,50 @@ def record_event(db, **row):
         db.table('listing_acquisition_events').insert(row).execute()
     except Exception as e:
         print(f'ACQUISITION EVENT WARNING: {e}')
+
+
+def retire_rejected_discovery(db, item, reason: str):
+    """Best-effort cleanup for a search-discovered row from an older run.
+
+    A rejected result is not an error. If V3.10.15 or earlier already queued the
+    same listing from Search Watch, seeing it again lets us quietly deactivate
+    that search-discovered row. Manually/own-added listings are never touched.
+    """
+    try:
+        rows = (
+            db.table('listings')
+            .select('id,discovered_via,source_watch_id,metadata')
+            .eq('marketplace', 'Trade Me')
+            .eq('listing_id', str(item.get('listing_id') or ''))
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if not rows:
+            return False
+        row = rows[0]
+        if row.get('discovered_via') != 'browser_search' and not row.get('source_watch_id'):
+            return False
+        metadata = dict(row.get('metadata') or {})
+        metadata['search_discovery_filter'] = {
+            'reason': reason,
+            'filtered_at': iso(),
+            'policy': 'v3.10.16',
+        }
+        db.table('listings').update(
+            {
+                'active': False,
+                'next_observation_at': None,
+                'cadence_reason': 'silently filtered from Search Watch discovery',
+                'metadata': metadata,
+            }
+        ).eq('id', row['id']).execute()
+        return True
+    except Exception:
+        # Discovery filtering must never turn ordinary search noise into a failed
+        # Search Watch or a user-facing intervention. A later run can retry.
+        return False
 
 
 def upsert_discovery(db, watch, run, item):
@@ -324,7 +474,7 @@ def run_watch(db, watch, browser):
         .execute()
         .data[0]
     )
-    attempted = ok = results = new = known = 0
+    attempted = ok = results = new = known = filtered = 0
     error_type = error_message = None
     diagnostics = {
         'search_term': watch['search_term'],
@@ -332,6 +482,11 @@ def run_watch(db, watch, browser):
         'pages': [],
         'source': 'browser_search',
         'pagination_mode': 'semantic_dom_scan',
+        'discovery_filter': {
+            'max_listing_price_nzd': MAX_LISTING_PRICE_NZD,
+            'filtered_total': 0,
+            'reasons': {},
+        },
     }
     context = browser.new_context(
         locale='en-NZ',
@@ -393,6 +548,21 @@ def run_watch(db, watch, browser):
                     continue
                 seen.add(lid)
                 results += 1
+
+                rejection = discovery_rejection(item)
+                if rejection:
+                    filtered += 1
+                    filt = diagnostics['discovery_filter']
+                    filt['filtered_total'] = int(filt.get('filtered_total') or 0) + 1
+                    reasons = filt.setdefault('reasons', {})
+                    reasons[rejection] = int(reasons.get(rejection) or 0) + 1
+                    # Intentionally silent: no listing row, no observation schedule,
+                    # no acquisition failure and no dashboard error/intervention.
+                    # If an older Search Watch already queued this exact result,
+                    # quietly retire that search-discovered row as well.
+                    retire_rejected_discovery(db, item, rejection)
+                    continue
+
                 if new >= MAX_NEW_PER_WATCH:
                     continue
                 if upsert_discovery(db, watch, run, item):
@@ -479,6 +649,7 @@ def run_watch(db, watch, browser):
                 'results': results,
                 'new': new,
                 'known': known,
+                'filtered': filtered,
                 'pages': ok,
                 'error_type': error_type,
             }

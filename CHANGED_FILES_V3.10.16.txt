@@ -1,0 +1,23 @@
+COBALT V3.10.16 — Search Watch vehicle / high-price discovery gate
+
+Changed:
+- worker/search_watches.py
+  - Search result cards now capture nearby visible card text as well as title/URL.
+  - Whole vehicle Trade Me URL paths are rejected before listing upsert.
+  - Visible prices are parsed from result cards. Results at or above NZ$5,000 are silently rejected by default.
+  - SEARCH_WATCH_MAX_LISTING_PRICE_NZD can override the ceiling.
+  - Conservative whole-vehicle text classifier catches low-price vehicles when URL category is unavailable.
+  - Component/part vocabulary prevents fitment-heavy parts titles from being mistaken for vehicles.
+  - Filtered results never create listing rows, observation schedules, acquisition failures, or dashboard intervention errors.
+  - If an older Search Watch already queued the same rejected listing, a later search sighting silently deactivates that search-discovered row (manual/own listings are untouched).
+  - Run diagnostics record aggregate filtered counts/reasons only.
+- worker/test_search_watches.py
+  - Added vehicle URL, price ceiling, low-price vehicle, part-fitment, configurable threshold and price parsing regressions.
+- .github/workflows/observe.yml
+  - Pins the production Search Watch discovery ceiling to NZ$5,000.
+- web/app/access/AccessClient.tsx
+  - Corrected inherited malformed boxShadow inline-style syntax that blocked the 3.10.15 production build.
+- web/package.json / web/package-lock.json
+  - Version 3.10.16.
+
+No database migration required.

@@ -15,6 +15,7 @@ jobs:
         working-directory: worker
     env:
       MAX_LISTINGS_PER_RUN: '24'
+      SEARCH_WATCH_MAX_LISTING_PRICE_NZD: '5000'
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       COBALT_WEB_URL: 'https://fishing-pond-seven.vercel.app'

@@ -17,6 +17,9 @@ from search_watches import (
     choose_next_pagination_candidate,
     initial_due,
     search_url,
+    listing_prices,
+    whole_vehicle_url,
+    discovery_rejection,
 )
 
 
@@ -102,6 +105,60 @@ class SearchWatchTests(unittest.TestCase):
             current,
         )
         self.assertIsNone(c)
+
+
+    def test_vehicle_url_is_rejected_silently(self):
+        item = {
+            'url': 'https://www.trademe.co.nz/a/motors/cars/toyota/aqua/listing/6121979829',
+            'listing_title': '2014 Toyota Aqua NHP10',
+            'card_text': '2014 Toyota Aqua Hybrid Automatic 121,000 km $8,990',
+        }
+        self.assertTrue(whole_vehicle_url(item['url']))
+        self.assertEqual(discovery_rejection(item), 'whole_vehicle_url')
+
+    def test_expensive_non_vehicle_result_is_rejected(self):
+        item = {
+            'url': 'https://www.trademe.co.nz/a/marketplace/listing/6121979829',
+            'listing_title': 'Toyota Aqua NHP10 complete engine',
+            'card_text': 'Buy now $6,250.00',
+        }
+        self.assertEqual(discovery_rejection(item), 'price_ceiling')
+
+    def test_normal_part_is_allowed(self):
+        item = {
+            'url': 'https://www.trademe.co.nz/a/motors/car-parts-accessories/toyota/listing/6121979829',
+            'listing_title': 'Toyota Aqua NHP10 master window switch',
+            'card_text': 'Buy now $79.00 Auckland',
+        }
+        self.assertIsNone(discovery_rejection(item))
+
+    def test_fitment_year_does_not_make_part_a_vehicle(self):
+        item = {
+            'url': 'https://www.trademe.co.nz/a/motors/car-parts-accessories/listing/6121979829',
+            'listing_title': '2012-2017 Aqua NHP10 headlight left',
+            'card_text': 'Toyota Aqua NHP10 headlight $189',
+        }
+        self.assertIsNone(discovery_rejection(item))
+
+    def test_low_price_vehicle_text_is_still_rejected(self):
+        item = {
+            'url': 'https://www.trademe.co.nz/a/marketplace/listing/6121979829',
+            'listing_title': '2012 Toyota Aqua NHP10',
+            'card_text': 'Hybrid automatic hatchback 218,000 km $3,900',
+        }
+        self.assertEqual(discovery_rejection(item), 'whole_vehicle_text')
+
+    def test_price_parser_prefers_detection_not_display_assumptions(self):
+        self.assertEqual(listing_prices('Reserve $1, finance from $89, buy now $12,990'), [1.0, 89.0, 12990.0])
+
+    def test_price_ceiling_is_configurable(self):
+        item = {
+            'url': 'https://www.trademe.co.nz/a/marketplace/listing/6121979829',
+            'listing_title': 'Aqua NHP10 inverter',
+            'card_text': '$5,500',
+        }
+        self.assertEqual(discovery_rejection(item, max_price_nzd=5000), 'price_ceiling')
+        self.assertIsNone(discovery_rejection(item, max_price_nzd=6000))
 
     def test_first_observation_is_within_hour_and_stable(self):
         a = initial_due('6121979829')
