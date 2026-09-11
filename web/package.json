@@ -1,6 +1,6 @@
 {
   "name": "cobalt-web",
-  "version": "3.10.14",
+  "version": "3.10.15",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,7 +8,7 @@
     "start": "next start",
     "test:intelligence": "node scripts/test-intelligence.cjs",
     "test:opportunities": "node scripts/test-opportunities.cjs",
-    "test:all": "npm run test:intelligence && npm run test:opportunities && npm run test:family-identity && npm run test:similarity && npm run test:cadence && npm run test:relist && npm run test:search-watches && npm run test:queue && npm run test:hover && npm run test:close-date",
+    "test:all": "npm run test:intelligence && npm run test:opportunities && npm run test:family-identity && npm run test:similarity && npm run test:cadence && npm run test:relist && npm run test:search-watches && npm run test:queue && npm run test:hover && npm run test:close-date && npm run test:sold-price",
     "test:similarity": "node scripts/test-generic-similarity.cjs",
     "test:cadence": "python3 ../worker/test_adaptive_cadence.py",
     "test:relist": "python3 ../worker/test_explicit_relist.py && python3 ../worker/test_relist_matcher.py && python3 ../worker/test_same_id_relist.py",
@@ -16,7 +16,8 @@
     "test:queue": "node scripts/test-queue-filters.cjs",
     "test:hover": "node scripts/test-hover-popovers.cjs",
     "test:close-date": "python3 ../worker/test_close_dates.py",
-    "test:family-identity": "node scripts/test-opportunity-family-identity.cjs"
+    "test:family-identity": "node scripts/test-opportunity-family-identity.cjs",
+    "test:sold-price": "node scripts/test-sold-price-pipeline.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

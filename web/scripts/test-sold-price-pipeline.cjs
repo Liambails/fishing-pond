@@ -1,0 +1,10 @@
+const fs=require('fs');
+const root=require('path').join(__dirname,'..','..');
+const collector=fs.readFileSync(require('path').join(root,'worker','collector.js'),'utf8');
+const intelligence=fs.readFileSync(require('path').join(root,'web','lib','intelligence.ts'),'utf8');
+const dashboard=fs.readFileSync(require('path').join(root,'web','components','Dashboard.tsx'),'utf8');
+if(!/Sold for\\s\*\\\$/.test(collector)&&!collector.includes('Sold for\\s*\\$')) throw new Error('collector missing explicit Sold for extraction');
+if(!collector.includes("put('sold_price_nzd'")) throw new Error('collector does not emit sold_price_nzd');
+if(!intelligence.includes('o.sold_price_nzd ?? o.buy_now_nzd')) throw new Error('realized price is not preferred');
+if(!dashboard.includes('sale price unavailable')) throw new Error('dashboard lacks unknown-final-price guard');
+console.log('realized sold-price pipeline regression tests passed');

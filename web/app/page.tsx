@@ -16,7 +16,7 @@ export default async function Page(){
  const [products,listings,obs,{data:errors},{data:events},links,ownListings,matchCandidates,{data:opportunities},{data:opportunityNotifications},opportunityLinks,listingDrafts]=await Promise.all([
   fetchPaged(()=>db.from('products').select('*').is('archived_at',null).order('priority',{ascending:false}),1000,5000),
   fetchPaged(()=>db.from('listings').select('*').order('next_observation_at',{ascending:true}).order('id',{ascending:true}),1000,10000),
-  fetchPaged(()=>db.from('observations').select('listing_uuid,captured_at,lifecycle_episode,views,watchers,bids,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,close_date,close_remaining,question_count,purchase_intent_questions,compatibility_questions,condition_questions,buy_now_available,offer_available,stock_quantity,listing_status,sold_detected,qa_identity_codes').order('captured_at',{ascending:false}).order('id',{ascending:false}),1000,100000),
+  fetchPaged(()=>db.from('observations').select('listing_uuid,captured_at,lifecycle_episode,views,watchers,bids,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,sold_price_nzd,close_date,close_remaining,question_count,purchase_intent_questions,compatibility_questions,condition_questions,buy_now_available,offer_available,stock_quantity,listing_status,sold_detected,qa_identity_codes').order('captured_at',{ascending:false}).order('id',{ascending:false}),1000,100000),
   db.from('collection_errors').select('*').order('occurred_at',{ascending:false}).limit(150),
   db.from('system_events').select('*').order('occurred_at',{ascending:false}).limit(150),
   fetchPaged(()=>db.from('product_listings').select('*').order('product_id',{ascending:true}),1000,50000),

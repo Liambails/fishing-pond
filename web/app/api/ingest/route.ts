@@ -77,7 +77,7 @@ const REQUIRED_CAPTURE_WARNINGS = new Set(['missing_listing_id','missing_title',
 function captureQuality(raw:any){
   const q=raw?.extraction_quality||{};
   const warnings=Array.isArray(q.warnings)?q.warnings.map(String):[];
-  const pricePresent=[raw?.buy_now_nzd,raw?.asking_price_nzd,raw?.starting_price_nzd,raw?.current_bid_nzd].some(v=>asNum(v)!=null);
+  const pricePresent=[raw?.buy_now_nzd,raw?.asking_price_nzd,raw?.starting_price_nzd,raw?.current_bid_nzd,raw?.sold_price_nzd].some(v=>asNum(v)!=null);
   const derived:string[]=[];
   if(!raw?.listing_id)derived.push('missing_listing_id');
   if(!raw?.listing_title)derived.push('missing_title');
@@ -93,13 +93,13 @@ function observationProvesComplete(o:any){
   if(raw?.extraction_quality)return captureQuality(raw).complete;
   const flags=Array.isArray(o?.quality_flags)?o.quality_flags.map(String):[];
   if(flags.some((w:string)=>REQUIRED_CAPTURE_WARNINGS.has(w)))return false;
-  const pricePresent=[o?.buy_now_nzd,o?.asking_price_nzd,o?.starting_price_nzd,o?.current_bid_nzd].some(v=>asNum(v)!=null);
+  const pricePresent=[o?.buy_now_nzd,o?.asking_price_nzd,o?.starting_price_nzd,o?.current_bid_nzd,o?.sold_price_nzd].some(v=>asNum(v)!=null);
   return Number(o?.extraction_score)===100&&pricePresent&&asNum(o?.views)!=null&&Boolean(o?.seller);
 }
 function metadataCaptureComplete(metadata:any){return metadata?.initial_capture_complete===true;}
 
 function listingCaptureSummary(raw:any,capturedAt:string){
-  const keys=['collector_version','listing_title','description','listing_mode','buy_now_nzd','asking_price_nzd','starting_price_nzd','current_bid_nzd','views','watchers','bids','close_date','close_remaining','listing_status','listing_ended','listing_end_reason','sold_detected','condition','location','seller','seller_feedback_pct','seller_feedback_count','seller_in_trade','seller_address_verified','seller_member_since','shipping_options','pickup_available','q_and_a','question_count','buy_now_available','offer_available','stock_quantity','category_path','breadcrumbs','primary_image_url','marketplace_attributes','marketplace_attribute_map','extraction_quality','_sources'];
+  const keys=['collector_version','listing_title','description','listing_mode','buy_now_nzd','asking_price_nzd','starting_price_nzd','current_bid_nzd','sold_price_nzd','views','watchers','bids','close_date','close_remaining','listing_status','listing_ended','listing_end_reason','sold_detected','condition','location','seller','seller_feedback_pct','seller_feedback_count','seller_in_trade','seller_address_verified','seller_member_since','shipping_options','pickup_available','q_and_a','question_count','buy_now_available','offer_available','stock_quantity','category_path','breadcrumbs','primary_image_url','marketplace_attributes','marketplace_attribute_map','extraction_quality','_sources'];
   const out:any={captured_at:capturedAt};for(const k of keys)if(raw?.[k]!==undefined)out[k]=raw[k];return out;
 }
 
@@ -173,7 +173,7 @@ export async function GET(req: Request) {
   if(!listing)return json({ok:true,exists:false,capture_complete:false});
   let complete=metadataCaptureComplete(listing.metadata);
   if(!complete){
-    const {data:observations}=await db.from('observations').select('extraction_score,quality_flags,raw_snapshot,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,views,seller').eq('listing_uuid',listing.id).order('captured_at',{ascending:false}).limit(20);
+    const {data:observations}=await db.from('observations').select('extraction_score,quality_flags,raw_snapshot,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,sold_price_nzd,views,seller').eq('listing_uuid',listing.id).order('captured_at',{ascending:false}).limit(20);
     complete=(observations||[]).some(observationProvesComplete);
   }
   return json({ok:true,exists:true,capture_complete:complete});
@@ -200,7 +200,7 @@ export async function POST(req: Request) {
   const quality=captureQuality({...raw,listing_id:identity.listingId});
   let previouslyComplete=metadataCaptureComplete(existing?.metadata);
   if(existing&&!previouslyComplete){
-    const {data:priorObservations}=await db.from('observations').select('extraction_score,quality_flags,raw_snapshot,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,views,seller').eq('listing_uuid',existing.id).order('captured_at',{ascending:false}).limit(20);
+    const {data:priorObservations}=await db.from('observations').select('extraction_score,quality_flags,raw_snapshot,buy_now_nzd,asking_price_nzd,starting_price_nzd,current_bid_nzd,sold_price_nzd,views,seller').eq('listing_uuid',existing.id).order('captured_at',{ascending:false}).limit(20);
     previouslyComplete=(priorObservations||[]).some(observationProvesComplete);
   }
   const captureComplete=previouslyComplete||quality.complete;
@@ -234,7 +234,7 @@ export async function POST(req: Request) {
   const q=raw.extraction_quality||{};
   const observation:any={
     listing_uuid:listing.id,captured_at:capturedAt,lifecycle_episode:targetEpisode,collector_version:raw.collector_version||null,listing_mode:raw.listing_mode||null,
-    buy_now_nzd:asNum(raw.buy_now_nzd),asking_price_nzd:asNum(raw.asking_price_nzd),starting_price_nzd:asNum(raw.starting_price_nzd),current_bid_nzd:asNum(raw.current_bid_nzd),
+    buy_now_nzd:asNum(raw.buy_now_nzd),asking_price_nzd:asNum(raw.asking_price_nzd),starting_price_nzd:asNum(raw.starting_price_nzd),current_bid_nzd:asNum(raw.current_bid_nzd),sold_price_nzd:asNum(raw.sold_price_nzd),
     views:asNum(raw.views),watchers:asNum(raw.watchers),bids:asNum(raw.bids),close_date:normalizedCloseDate,close_remaining:raw.close_remaining||null,
     question_count:asNum(raw.question_count),purchase_intent_questions:asNum(raw.purchase_intent_questions),compatibility_questions:asNum(raw.compatibility_questions),condition_questions:asNum(raw.condition_questions),
     q_and_a:Array.isArray(raw.q_and_a)?raw.q_and_a:null,qa_identity_codes:Array.isArray(raw.qa_identity_codes)?raw.qa_identity_codes:null,

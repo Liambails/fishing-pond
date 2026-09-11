@@ -1,7 +1,7 @@
 window.CobaltCollect = async function() {
   // COBALT Trade Me DOM Collector v1.5.8
   // Current manually-opened page only. No crawling, navigation, or remote fetches.
-  const VERSION = "1.5.9";
+  const VERSION = "1.6.0";
   const $ = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => [...r.querySelectorAll(s)];
   const clean = v => String(v ?? "").trim().replace(/\s+/g, " ");
@@ -79,6 +79,9 @@ window.CobaltCollect = async function() {
   let asking=matchMoney(/Asking price:?\s*\$([\d,]+(?:\.\d{1,2})?)/i,priceArea,pageText);
   let starting=matchMoney(/Starting price\s*\$([\d,]+(?:\.\d{1,2})?)/i,priceArea,pageText);
   let currentBid=matchMoney(/Current bid\s*\$([\d,]+(?:\.\d{1,2})?)/i,priceArea,pageText);
+  // Realized transaction price is distinct from the last active bid. Closed Trade Me pages
+  // can expose an explicit `Sold for $62.00` value; capture only that labelled outcome.
+  const soldPrice=matchMoney(/\bSold for\s*\$([\d,]+(?:\.\d{1,2})?)/i,priceArea,pageText);
   if(buyNow==null&&asking==null&&currentBid==null&&offer?.price!=null){const p=Number(offer.price); if(isMarketplace||/Asking price/i.test(pageText))asking=p; else if(/Buy Now/i.test(pageText))buyNow=p; else currentBid=p;}
   const placeBid=/\bPlace bid\b/i.test(priceArea)||/\bStarting price\b/i.test(priceArea);
   const noReserve=/\bNo reserve\b/i.test(priceArea);
@@ -87,6 +90,7 @@ window.CobaltCollect = async function() {
   put('asking_price_nzd',asking,asking!=null?'pricing-dom/jsonld':null,.96);
   put('starting_price_nzd',starting,starting!=null?'pricing-dom/text':null,.96);
   put('current_bid_nzd',currentBid,currentBid!=null?'pricing-dom/text':null,.94);
+  put('sold_price_nzd',soldPrice,soldPrice!=null?'pricing-dom/text:sold-for':null,.99);
   put('no_reserve',noReserve,'pricing-text',.9); put('reserve_not_met',reserveNotMet,'pricing-text',.9);
   let mode=asking!=null?'classified':(placeBid&&buyNow!=null?'auction_buy_now':placeBid?'auction':buyNow!=null?'buy_now':null);
   put('listing_mode',mode,'derived:pricing',.95);

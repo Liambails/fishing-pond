@@ -108,7 +108,7 @@ function productPartTokens(product:any){const matches=String(product?.display_na
 function conflictKnownMake(product:any,shape:any){return Boolean(product?.vehicle_make&&shape.make&&norm(product.vehicle_make)!==norm(shape.make))}
 function conflictKnownModel(product:any,shape:any){return Boolean(product?.vehicle_model&&shape.model&&productModelCanonical(product.vehicle_model)!==shape.model)}
 function chassisEvidence(product:any,shape:any){const expected=norm(normalizeChassis(product?.chassis)).replace(/\s/g,'');if(!expected)return {match:false,known:false};const full=norm(shape.full).replace(/\s/g,'');return {match:full.includes(expected),known:Boolean(shape.chassis)}}
-function observationPrice(obs:any){const n=obs?.buy_now_nzd??obs?.asking_price_nzd??obs?.current_bid_nzd??null;const x=Number(n);return Number.isFinite(x)&&x>0?x:null}
+function observationPrice(obs:any){const n=obs?.sold_price_nzd??obs?.buy_now_nzd??obs?.asking_price_nzd??obs?.current_bid_nzd??null;const x=Number(n);return Number.isFinite(x)&&x>0?x:null}
 function priceCompatibility(price:number|null,medianPrice:number|null|undefined){
   if(!price||!medianPrice||medianPrice<=0)return null;
   const distance=Math.abs(Math.log(price/medianPrice));
@@ -207,7 +207,7 @@ async function buildProductContext(db:any,product:any):Promise<MatchContext>{
   const {data:links}=await db.from('product_listings').select('listing_uuid').eq('product_id',product.id).eq('role','competitor');
   const ids=(links||[]).map((x:any)=>x.listing_uuid).filter(Boolean);const prices:number[]=[];
   if(ids.length){
-    const {data:rows}=await db.from('observations').select('listing_uuid,captured_at,buy_now_nzd,asking_price_nzd,current_bid_nzd').in('listing_uuid',ids).order('captured_at',{ascending:false}).limit(Math.max(100,ids.length*5));
+    const {data:rows}=await db.from('observations').select('listing_uuid,captured_at,buy_now_nzd,asking_price_nzd,current_bid_nzd,sold_price_nzd').in('listing_uuid',ids).order('captured_at',{ascending:false}).limit(Math.max(100,ids.length*5));
     const seen=new Set<string>();for(const o of rows||[]){if(seen.has(o.listing_uuid))continue;seen.add(o.listing_uuid);const p=observationPrice(o);if(p)prices.push(p)}
   }
   return {productIdentity,marketMedianPrice:median(prices),sourceListingId:product?.source_listing_uuid||null};

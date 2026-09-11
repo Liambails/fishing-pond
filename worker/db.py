@@ -61,7 +61,7 @@ def final_verdict(observations, closure_reason=None, acquisition_events=None):
 
 
 def _recent_observations(db, listing_uuid, limit=12, episode=None):
-    q=(db.table('observations').select('captured_at,views,watchers,bids,question_count,purchase_intent_questions,buy_now_nzd,asking_price_nzd,current_bid_nzd,close_date,lifecycle_episode').eq('listing_uuid',listing_uuid))
+    q=(db.table('observations').select('captured_at,views,watchers,bids,question_count,purchase_intent_questions,buy_now_nzd,asking_price_nzd,current_bid_nzd,sold_price_nzd,close_date,lifecycle_episode').eq('listing_uuid',listing_uuid))
     if episode is not None: q=q.eq('lifecycle_episode',episode)
     return q.order('captured_at',desc=True).limit(limit).execute().data or []
 
@@ -76,7 +76,7 @@ def _recent_acquisition_events(db, listing_uuid, limit=100):
 def _latest_capture_summary(raw):
     raw=dict(raw or {})
     keys=(
-        'captured_at','collector_version','listing_title','description','listing_mode','buy_now_nzd','asking_price_nzd','starting_price_nzd','current_bid_nzd',
+        'captured_at','collector_version','listing_title','description','listing_mode','buy_now_nzd','asking_price_nzd','starting_price_nzd','current_bid_nzd','sold_price_nzd',
         'views','watchers','bids','close_date','close_remaining','listing_status','listing_ended','listing_end_reason','sold_detected',
         'condition','location','seller','seller_feedback_pct','seller_feedback_count','seller_in_trade','seller_address_verified','seller_member_since',
         'shipping_options','pickup_available','q_and_a','question_count','buy_now_available','offer_available','stock_quantity','category_path','breadcrumbs',
@@ -178,7 +178,7 @@ def save_success(listing, raw):
     episode=current_episode+(1 if reopened else 0)
     obs={
         'listing_uuid':lid,'captured_at':captured,'lifecycle_episode':episode,'collector_version':raw.get('collector_version'),'listing_mode':raw.get('listing_mode'),
-        'buy_now_nzd':raw.get('buy_now_nzd'),'asking_price_nzd':raw.get('asking_price_nzd'),'starting_price_nzd':raw.get('starting_price_nzd'),'current_bid_nzd':raw.get('current_bid_nzd'),
+        'buy_now_nzd':raw.get('buy_now_nzd'),'asking_price_nzd':raw.get('asking_price_nzd'),'starting_price_nzd':raw.get('starting_price_nzd'),'current_bid_nzd':raw.get('current_bid_nzd'),'sold_price_nzd':raw.get('sold_price_nzd'),
         'views':raw.get('views'),'watchers':raw.get('watchers'),'bids':raw.get('bids'),'close_date':normalize_close_date(raw.get('close_date'), captured),'close_remaining':raw.get('close_remaining'),
         'question_count':raw.get('question_count'),'purchase_intent_questions':raw.get('purchase_intent_questions'),'compatibility_questions':raw.get('compatibility_questions'),'condition_questions':raw.get('condition_questions'),'q_and_a':raw.get('q_and_a'),'qa_identity_codes':raw.get('qa_identity_codes'),
         'buy_now_available':raw.get('buy_now_available'),'offer_available':raw.get('offer_available'),'stock_quantity':raw.get('stock_quantity'),'listing_status':raw.get('listing_status'),'sold_detected':raw.get('sold_detected'),
@@ -192,6 +192,13 @@ def save_success(listing, raw):
     persist_observation=not (ended and prior_state in {'relist_watch','terminal_closed','relisted'})
     if persist_observation:
         db.table('observations').upsert(obs,on_conflict='listing_uuid,captured_at').execute()
+    elif ended and raw.get('sold_price_nzd') is not None:
+        # Relist-watch probes normally do not create frozen duplicate observations. They may,
+        # however, discover a realized sale price that an older collector missed. Enrich the
+        # final observation in-place with that explicit marketplace outcome.
+        latest_final=(db.table('observations').select('id,sold_price_nzd').eq('listing_uuid',lid).eq('lifecycle_episode',episode).order('captured_at',desc=True).limit(1).execute().data or [])
+        if latest_final and latest_final[0].get('sold_price_nzd') is None:
+            db.table('observations').update({'sold_price_nzd':raw.get('sold_price_nzd')}).eq('id',latest_final[0]['id']).execute()
     history=_recent_observations(db,lid,episode=episode)
     acquisition_events=_recent_acquisition_events(db,lid)
     metadata=dict(listing.get('metadata') or {}); metadata['latest_capture']=_latest_capture_summary(raw)

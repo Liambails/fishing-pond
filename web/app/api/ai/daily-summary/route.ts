@@ -11,7 +11,7 @@ export async function POST(req:Request){
   const {force=false}=await req.json().catch(()=>({force:false}));const db=adminClient();
   const [{data:products},{data:listings},{data:obs},{data:links},{data:errs},{data:events}]=await Promise.all([
    db.from('products').select('*').is('archived_at',null).limit(100),db.from('listings').select('*').limit(250),
-   db.from('observations').select('listing_uuid,captured_at,views,watchers,bids,buy_now_nzd,asking_price_nzd,current_bid_nzd,close_date,close_remaining').order('captured_at',{ascending:false}).limit(5000),
+   db.from('observations').select('listing_uuid,captured_at,views,watchers,bids,buy_now_nzd,asking_price_nzd,current_bid_nzd,sold_price_nzd,close_date,close_remaining').order('captured_at',{ascending:false}).limit(5000),
    db.from('product_listings').select('*'),db.from('collection_errors').select('status').eq('status','open'),db.from('system_events').select('status,severity').eq('status','open')
   ]);
   const baseLs=(listings||[]).map((l:any)=>({...l,observations:(obs||[]).filter((o:any)=>o.listing_uuid===l.id).slice(0,40)}));

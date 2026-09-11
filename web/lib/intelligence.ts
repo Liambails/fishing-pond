@@ -7,6 +7,7 @@ export type Obs = {
   asking_price_nzd?:number|null;
   buy_now_nzd?:number|null;
   current_bid_nzd?:number|null;
+  sold_price_nzd?:number|null;
   starting_price_nzd?:number|null;
   close_date?:string|null;
   close_remaining?:string|null;
@@ -63,7 +64,7 @@ function qaSummary(o?:Obs|null){
   const condition=Math.max(0,Number(o?.condition_questions||0));
   return {total,purchase,compatibility,condition,identityCodes:Array.isArray(o?.qa_identity_codes)?o!.qa_identity_codes:[]};
 }
-export function priceOf(o:Obs){ return o.buy_now_nzd ?? o.asking_price_nzd ?? o.current_bid_nzd ?? null; }
+export function priceOf(o:Obs){ return o.sold_price_nzd ?? o.buy_now_nzd ?? o.asking_price_nzd ?? o.current_bid_nzd ?? null; }
 
 function chronological(obs:Obs[]=[]){
   return [...obs].filter(x=>x.captured_at).sort((a,b)=>Date.parse(a.captured_at!)-Date.parse(b.captured_at!));
@@ -208,7 +209,7 @@ function baseSignal(listing:Listing){
   const views24h=viewsLast24Hours(obs,acquisitionEvents);
   const evidenceDetailsValue=evidenceDetails(listing,obs);
   const qas=qaSummary(latest);
-  return {obs,latest,views,watchers,bids,lastWatcherChange,lastBidChange,currentBid,startingPrice,velocity,priorVelocity,overallVelocity,price,priceCapturedAt,priceIsLatest,observationCount,independentObservationCount,lastViewChange:lastViewChange!=null&&lastViewChange>=0?lastViewChange:null,lastViewChangeHours,velocityIntervalHours:recentInfo?.hours??null,velocityTrust:recentInfo?.trust??null,rawRecentVelocity:recentInfo?.rawVelocity??null,marketplaceRawRecentVelocity:recentInfo?.marketplaceRawVelocity??null,rawLastViewChange:lastViewDeltaInfo?.rawDelta??null,possibleObserverViewsLastInterval:lastViewDeltaInfo?.possibleObserverViews??0,evidence,engagement,close,views24h,evidenceDetails:evidenceDetailsValue,qas,soldDetected:Boolean(latest?.sold_detected)};
+  return {obs,latest,views,watchers,bids,lastWatcherChange,lastBidChange,currentBid,startingPrice,velocity,priorVelocity,overallVelocity,price,priceCapturedAt,priceIsLatest,observationCount,independentObservationCount,lastViewChange:lastViewChange!=null&&lastViewChange>=0?lastViewChange:null,lastViewChangeHours,velocityIntervalHours:recentInfo?.hours??null,velocityTrust:recentInfo?.trust??null,rawRecentVelocity:recentInfo?.rawVelocity??null,marketplaceRawRecentVelocity:recentInfo?.marketplaceRawVelocity??null,rawLastViewChange:lastViewDeltaInfo?.rawDelta??null,possibleObserverViewsLastInterval:lastViewDeltaInfo?.possibleObserverViews??0,evidence,engagement,close,views24h,evidenceDetails:evidenceDetailsValue,qas,soldDetected:Boolean(latest?.sold_detected),soldPrice:latest?.sold_price_nzd==null?null:Number(latest.sold_price_nzd)};
 }
 
 export function computeListingSignals(listings:Listing[]){
